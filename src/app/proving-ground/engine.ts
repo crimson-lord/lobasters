@@ -18,6 +18,7 @@ const initialState: ProvingGroundState = {
   transcript: null,
   status: 'configuring',
   currentPhase: 'asking',
+  activityMessage: 'Configure the examination to begin.',
   errorCount: 0,
 };
 
@@ -28,6 +29,7 @@ function provingGroundReducer(state: ProvingGroundState, action: ProvingGroundAc
         ...initialState,
         status: 'running',
         currentPhase: 'asking',
+        activityMessage: 'Starting examination. Contacting the teacher for question 1…',
         config: action.payload.config,
         transcript: {
           config: action.payload.config,
@@ -60,6 +62,8 @@ function provingGroundReducer(state: ProvingGroundState, action: ProvingGroundAc
         ...state,
         transcript: { ...state.transcript, turns: [...state.transcript.turns, newTurn] },
         currentPhase: 'answering',
+        activityMessage: 'Question received. Asking the student for an answer…',
+        errorCount: 0,
       };
     }
     case 'PROCESS_STUDENT_ANSWER': {
@@ -77,6 +81,8 @@ function provingGroundReducer(state: ProvingGroundState, action: ProvingGroundAc
         ...state,
         transcript: { ...state.transcript, turns: updatedTurns },
         currentPhase: 'evaluating',
+        activityMessage: 'Student answer received. Asking the teacher to evaluate it…',
+        errorCount: 0,
       };
     }
     case 'PROCESS_TEACHER_EVALUATION': {
@@ -101,6 +107,10 @@ function provingGroundReducer(state: ProvingGroundState, action: ProvingGroundAc
         ...state,
         transcript: { ...state.transcript, turns: updatedTurns },
         currentPhase: isFinalEvaluation ? 'summarizing' : 'asking',
+        activityMessage: isFinalEvaluation
+          ? 'All questions are graded. Preparing the final report…'
+          : 'Evaluation recorded. Preparing the next question…',
+        errorCount: 0,
       };
     }
     case 'SET_FINAL_SUMMARY': {
@@ -130,6 +140,7 @@ function provingGroundReducer(state: ProvingGroundState, action: ProvingGroundAc
       return {
         ...state,
         status: 'finished',
+        activityMessage: 'Examination complete. Your report is ready.',
         transcript: {
           ...state.transcript,
           finishedAt: new Date().toISOString(),
@@ -140,7 +151,10 @@ function provingGroundReducer(state: ProvingGroundState, action: ProvingGroundAc
         ...state,
         status: 'error',
         error: action.payload.error,
+        activityMessage: `Examination stopped: ${action.payload.error}`,
       };
+    case 'SET_ACTIVITY':
+      return { ...state, activityMessage: action.payload.message };
     case 'ADD_ERROR': {
         const newErrorCount = state.errorCount + 1;
         if (newErrorCount >= 5) {
@@ -148,7 +162,8 @@ function provingGroundReducer(state: ProvingGroundState, action: ProvingGroundAc
                 ...state,
                 errorCount: newErrorCount,
                 status: 'error',
-                error: `Examination stopped after ${newErrorCount} consecutive errors. Last: ${action.payload.error}`
+                error: `Examination stopped after ${newErrorCount} consecutive errors. Last: ${action.payload.error}`,
+                activityMessage: `Examination stopped after repeated provider errors: ${action.payload.error}`,
             };
         }
         return {
@@ -164,7 +179,12 @@ function provingGroundReducer(state: ProvingGroundState, action: ProvingGroundAc
 }
 
 
-async function withRetry<T>(fn: () => Promise<T>, attempts = 5, delay = 3000): Promise<T> {
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  attempts = 5,
+  delay = 3000,
+  onRetry?: (message: string) => void,
+): Promise<T> {
   let lastError: any;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -177,6 +197,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 5, delay = 3000): P
       const errorMessage = error.message || 'An unknown API error occurred';
       const status = error.status ? ` (status: ${error.status})` : '';
       console.warn(`Attempt ${i + 1} failed: ${errorMessage}${status}. Retrying in ${delay / 1000}s...`);
+      onRetry?.(`Provider request delayed${status}. Retrying ${i + 2}/${attempts} in ${delay / 1000} seconds…`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -198,6 +219,7 @@ export function useProvingGroundEngine() {
     try {
         if (currentPhase === 'asking') {
             const teacherHistory = constructTeacherHistory(transcript.turns);
+            dispatch({ type: 'SET_ACTIVITY', payload: { message: `Contacting the teacher for question ${currentTurnNumber + 1}…` } });
             await withRetry(async () => {
                 const prompt = getTeacherQuestionPrompt(currentTurnNumber + 1);
                 const { rawRequest, rawResponse } = await runTeacherTurn({
@@ -216,12 +238,13 @@ export function useProvingGroundEngine() {
                 } else {
                     throw new Error("Teacher failed to call the 'askQuestion' tool when expected.");
                 }
-            });
+            }, 5, 3000, (message) => dispatch({ type: 'SET_ACTIVITY', payload: { message } }));
         } 
         else if (currentPhase === 'answering') {
             const completedTurns = transcript.turns.slice(0, currentTurnNumber - 1);
             const lastTurn = transcript.turns[currentTurnNumber - 1];
             
+            dispatch({ type: 'SET_ACTIVITY', payload: { message: 'Contacting the student for an answer…' } });
             await withRetry(async () => {
                 const studentPrompt = getStudentPrompt(completedTurns, lastTurn.question, currentTurnNumber);
                 const { rawRequest, rawResponse } = await runStudentTurn({
@@ -235,11 +258,12 @@ export function useProvingGroundEngine() {
                 } else {
                     throw new Error("Student returned an empty response.");
                 }
-            });
+            }, 5, 3000, (message) => dispatch({ type: 'SET_ACTIVITY', payload: { message } }));
         }
         else if (currentPhase === 'evaluating') {
             const lastTurn = transcript.turns[transcript.turns.length - 1];
             const teacherHistory = constructTeacherHistory(transcript.turns);
+            dispatch({ type: 'SET_ACTIVITY', payload: { message: 'Contacting the teacher for an evaluation…' } });
             await withRetry(async () => {
                 const prompt = getTeacherEvaluationPrompt(lastTurn);
                 const { rawRequest, rawResponse } = await runTeacherTurn({
@@ -263,10 +287,11 @@ export function useProvingGroundEngine() {
                 } else {
                     throw new Error("Teacher failed to call the 'provideEvaluation' tool when expected.");
                 }
-            });
+            }, 5, 3000, (message) => dispatch({ type: 'SET_ACTIVITY', payload: { message } }));
         }
         else if (currentPhase === 'summarizing') {
              const teacherHistory = constructTeacherHistory(transcript.turns);
+             dispatch({ type: 'SET_ACTIVITY', payload: { message: 'Contacting the teacher for the final report…' } });
              await withRetry(async () => {
                 const prompt = getTeacherSummaryPrompt();
                 const { rawRequest, rawResponse } = await runTeacherTurn({
@@ -285,7 +310,7 @@ export function useProvingGroundEngine() {
                 } else {
                    throw new Error("Teacher failed to call the 'provideSummary' tool when expected.");
                 }
-            });
+            }, 5, 3000, (message) => dispatch({ type: 'SET_ACTIVITY', payload: { message } }));
         }
 
     } catch (e: any) {

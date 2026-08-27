@@ -1,15 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-    experimental: {
-        serverActions: {
-            allowedOrigins: [
-                'localhost:3000',
-                '*.github.dev',
-                '*.app.github.dev',
-                '*.githubpreview.dev',
-            ],
-        },
-    },
+  // Server Actions already allow the page's own origin, including
+  // https://lobasters.vercel.app and Vercel preview deployments. Keep that
+  // default CSRF protection instead of maintaining a stale allow-list.
+  allowedDevOrigins: ['localhost', '127.0.0.1'],
 };
 
 export default nextConfig;

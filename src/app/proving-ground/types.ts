@@ -99,6 +99,7 @@ export interface ProvingGroundState {
   transcript: ProvingGroundTranscript | null;
   status: 'configuring' | 'running' | 'finished' | 'error';
   currentPhase: ExamPhase;
+  activityMessage: string;
   error?: string;
   errorCount: number;
 }
@@ -110,6 +111,7 @@ export type ProvingGroundAction =
   | { type: 'PROCESS_TEACHER_EVALUATION'; payload: { evaluation: Evaluation; rawRequest: any; rawResponse: any, thinking: string | null, tool_calls: OpenAI.Chat.ChatCompletionMessageToolCall[] } }
   | { type: 'SET_FINAL_SUMMARY'; payload: { summary: string; rawRequest: any; rawResponse: any; } }
   | { type: 'FINISH_EXAM' }
+  | { type: 'SET_ACTIVITY'; payload: { message: string } }
   | { type: 'SET_ERROR'; payload: { error: string } }
   | { type: 'ADD_ERROR'; payload: { error: string } }
   | { type: 'RESET' };

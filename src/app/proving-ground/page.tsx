@@ -695,7 +695,7 @@ interface ExamSessionProps {
 }
 
 function ExamSession({ state }: ExamSessionProps) {
-    const { transcript, config, currentPhase, errorCount } = state;
+    const { transcript, config, currentPhase, errorCount, activityMessage } = state;
     const turns = transcript?.turns || [];
     const currentTurnNumber = turns.length;
     const lastTurn = turns[currentTurnNumber - 1];
@@ -732,9 +732,12 @@ function ExamSession({ state }: ExamSessionProps) {
                             {statusMessage}
                         </p>
                     </div>
+                    <p className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-center text-sm text-primary" aria-live="polite">
+                        {activityMessage}
+                    </p>
                     {errorCount > 0 && (
                         <div className="text-center text-sm font-mono text-destructive/80">
-                            Errors: {errorCount} / 50
+                            Consecutive failed phases: {errorCount} / 5
                         </div>
                     )}
                     <Separator />
