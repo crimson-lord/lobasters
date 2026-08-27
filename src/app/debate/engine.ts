@@ -158,7 +158,18 @@ export function useDebateEngine(initialConfig: DebateConfig) {
           currentThinkingMessageId = thinkingMessage.id;
           dispatch({ type: 'ADD_MESSAGE', payload: thinkingMessage });
 
-          const response = await fetchAgentResponse(currentAgentConfig, stateRef.current.messages, prompt, currentAgentId, stateRef.current.config!);
+          const response = await fetchAgentResponse(
+            currentAgentConfig,
+            stateRef.current.messages,
+            prompt,
+            currentAgentId,
+            stateRef.current.config!,
+            (delta) => {
+              if (typeof delta.content === 'string') {
+                dispatch({ type: 'APPEND_TO_MESSAGE', payload: { id: thinkingMessage.id, contentChunk: delta.content } });
+              }
+            },
+          );
         const { speak: visibleMessage, thinking: privateReasoning, rawRequest, rawResponse } = response;
 
         // Update the message with results and clear loading state, but preserve isThinking
@@ -247,13 +258,8 @@ export function useDebateEngine(initialConfig: DebateConfig) {
 
           if (turnFinished) break;
 
-          // If the agent also provided text, stream it.
+          // Text was already appended from the provider's actual stream.
           if (visibleMessage.trim().length > 0) {
-            const chunks = visibleMessage.split(' ');
-            for (const chunk of chunks) {
-              await new Promise(r => setTimeout(r, 30));
-              dispatch({ type: 'APPEND_TO_MESSAGE', payload: { id: thinkingMessage.id, contentChunk: chunk + ' ' } });
-            }
             hasSpoken = true;
           }
 
@@ -264,12 +270,7 @@ export function useDebateEngine(initialConfig: DebateConfig) {
           // If no text was spoken, the loop continues (agent called a tool and now needs to think again)
 
         } else {
-          // No tools, just a standard message. Stream it.
-          const chunks = visibleMessage.split(' ');
-          for (const chunk of chunks) {
-            await new Promise(r => setTimeout(r, 50));
-            dispatch({ type: 'APPEND_TO_MESSAGE', payload: { id: thinkingMessage.id, contentChunk: chunk + ' ' } });
-          }
+          // No tools: its text has already arrived through the actual stream.
           turnFinished = true;
           dispatch({ type: 'SWITCH_TURN' });
         }

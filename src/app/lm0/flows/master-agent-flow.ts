@@ -1,5 +1,3 @@
-'use server';
-
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
@@ -8,6 +6,7 @@ import {
   VirtualFileId,
 } from '../types';
 import OpenAI from 'openai';
+import { collectChatCompletion } from '@/lib/chat-stream';
 
 const createFileIdEnum = (config: LM0Config) => {
     const allowedFiles = config.allowedFiles;
@@ -28,15 +27,6 @@ export async function runMasterAgentTurn(messages: OpenAI.Chat.Completions.ChatC
   if (!apiKey) {
     throw new Error("No API key found. Please enter your API key in the Master Agent Settings.");
   }
-
-  const openai = new OpenAI({
-    baseURL: masterConfig.baseURL,
-    apiKey: apiKey,
-    defaultHeaders: {
-      "HTTP-Referer": "https://lobasters.vercel.app",
-      "X-Title": "Lobasters",
-    }
-  });
 
   const systemMessage = messages.find(m => m.role === 'system');
   const otherMessages = messages.filter(m => m.role !== 'system');
@@ -117,13 +107,16 @@ export async function runMasterAgentTurn(messages: OpenAI.Chat.Completions.ChatC
       ...(masterConfig.canThink ? { extra_body: { include_reasoning: true } } : {}),
   };
 
-  const response = await openai.chat.completions.create(requestPayload);
+  const { rawResponse } = await collectChatCompletion(
+    { baseURL: masterConfig.baseURL, apiKey },
+    requestPayload as unknown as Record<string, unknown>,
+  );
 
-  if (!response.choices || response.choices.length === 0 || !response.choices[0].message) {
-    throw new Error(`Master Agent returned no choices or an empty message from the API. Raw Response: ${'```json\n' + JSON.stringify(response, null, 2) + '\n```'}`);
+  if (!rawResponse) {
+    throw new Error('Master Agent returned an empty message from the API.');
   }
 
-  return response.choices[0].message;
+  return rawResponse as OpenAI.Chat.ChatCompletionMessage;
 }
 
 interface LLMToolOutput {
@@ -143,15 +136,6 @@ export async function runLLMTool({ config, prompt }: LLMToolInput): Promise<LLMT
         throw new Error(`No API key found for Helper Agent '${config.nickname}'. Please check your settings.`);
     }
 
-    const openai = new OpenAI({
-        baseURL: config.baseURL,
-        apiKey: apiKey,
-        defaultHeaders: {
-          "HTTP-Referer": "https://lobasters.vercel.app",
-          "X-Title": "Lobasters",
-        }
-    });
-    
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: 'system', content: config.systemPrompt },
         { role: 'user', content: prompt }
@@ -165,11 +149,14 @@ export async function runLLMTool({ config, prompt }: LLMToolInput): Promise<LLMT
         ...(config.canThink ? { extra_body: { include_reasoning: true } } : {}),
     };
 
-    const response = await openai.chat.completions.create(requestPayload);
+    const { rawRequest, rawResponse } = await collectChatCompletion(
+        { baseURL: config.baseURL, apiKey },
+        requestPayload as unknown as Record<string, unknown>,
+    );
 
-    const content = response.choices[0].message?.content;
+    const content = rawResponse.content;
     if (!content) {
         throw new Error("Subordinate LLM returned an empty response.");
     }
-    return { request: requestPayload, response: content };
+    return { request: rawRequest, response: content };
 }

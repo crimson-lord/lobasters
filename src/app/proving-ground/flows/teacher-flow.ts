@@ -1,8 +1,7 @@
-'use server';
-
 import OpenAI from 'openai';
 import { ProvingGroundAgentConfig, ApiMessage, ModelOutput, GradingScale } from '../types';
 import { ProviderResult, toProviderFailure } from './provider-result';
+import { collectChatCompletion } from '@/lib/chat-stream';
 
 const getTools = (gradingScale: GradingScale): OpenAI.Chat.Completions.ChatCompletionTool[] => {
     let validRanks: string[] = ['S', 'A', 'B', 'F'];
@@ -94,15 +93,6 @@ export async function runTeacherTurn(
       return { ok: false, error: { message: 'No API key found. Enter a key in Teacher Settings.', retryable: false } };
     }
 
-    const openai = new OpenAI({
-      baseURL: teacherConfig.baseURL.trim().replace(/\/$/, ''),
-      apiKey: apiKey,
-      defaultHeaders: {
-        "HTTP-Referer": "https://lobasters.vercel.app",
-        "X-Title": "Lobasters",
-      }
-    });
-
     const slicedHistory = teacherConfig.maxHistory ? history.slice(-teacherConfig.maxHistory) : history;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -123,19 +113,12 @@ export async function runTeacherTurn(
       ...(teacherConfig.canThink ? { extra_body: { include_reasoning: true } } : {}),
     };
 
-    const response = await openai.chat.completions.create(requestPayload);
+    const { rawRequest, rawResponse } = await collectChatCompletion(
+      { baseURL: teacherConfig.baseURL, apiKey },
+      requestPayload,
+    );
 
-    if (!response.choices || response.choices.length === 0) {
-      return { ok: false, error: { message: 'Teacher model returned no choices in its response.', retryable: true } };
-    }
-
-    const message = response.choices[0].message;
-  
-    if (!message) {
-      return { ok: false, error: { message: 'Teacher model returned an empty response.', retryable: true } };
-    }
-
-    return { ok: true, value: { rawRequest: requestPayload, rawResponse: message } };
+    return { ok: true, value: { rawRequest, rawResponse: rawResponse as OpenAI.Chat.ChatCompletionMessage } };
   } catch (error) {
     return { ok: false, error: toProviderFailure(error) };
   }

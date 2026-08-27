@@ -1,4 +1,3 @@
-'use server';
 import { AgentConfig, DebateResponse, Message, AgentID, DebateConfig } from './types';
 import { runDebateTurn } from './flows/debate-flow';
 import { parseResponse } from './parser';
@@ -13,7 +12,8 @@ export async function fetchAgentResponse(
   history: Message[],
   prompt: string,
   currentAgentId: AgentID,
-  debateConfig: DebateConfig
+  debateConfig: DebateConfig,
+  onDelta?: (delta: Record<string, unknown>) => void,
 ): Promise<DebateResponse> {
   // Construct the full system prompt for the model
   const fullPrompt = `${agentConfig.systemPrompt}\n\nUSER INSTRUCTION:\n${prompt}`;
@@ -64,26 +64,22 @@ export async function fetchAgentResponse(
     ];
 
   try {
-    const rawResponse = await runDebateTurn({
+    const { rawRequest, rawResponse } = await runDebateTurn({
       history: messagesForApi,
       agentConfig,
-    });
+    }, onDelta);
     
     const parsed = parseResponse(rawResponse, agentConfig);
 
     return { 
         ...parsed, 
-        rawRequest: { messages: messagesForApi, model: agentConfig.modelName, temperature: agentConfig.temperature }, 
+        rawRequest,
         rawResponse 
     };
 
-  } catch (e: any) {
-    console.error(`Agent API Error: ${e.message}`, e);
-    return {
-      thinking: `Encountered an error: ${e.message}`,
-      speak: `(An error occurred: ${e.message})`,
-      rawRequest: { messages: messagesForApi, model: agentConfig.modelName, error: 'Request was not sent due to error.' },
-      rawResponse: { error: e.message, status: e.status },
-    };
+  } catch (error) {
+    // Let the engine show the actionable provider error and decide whether a
+    // retry is appropriate. Rendering it as a debate message would hide it.
+    throw error;
   }
 }
