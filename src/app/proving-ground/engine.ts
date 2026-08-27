@@ -11,6 +11,7 @@ import { runStudentTurn } from './flows/student-flow';
 import { runTeacherTurn } from './flows/teacher-flow';
 import { getStudentPrompt, getTeacherQuestionPrompt, getTeacherEvaluationPrompt, getTeacherSummaryPrompt, constructTeacherHistory, sanitizeMessage } from './utils';
 import { parseWithThinking } from './parser';
+import { ProviderFailure } from './flows/provider-result';
 
 
 const initialState: ProvingGroundState = {
@@ -179,6 +180,22 @@ function provingGroundReducer(state: ProvingGroundState, action: ProvingGroundAc
 }
 
 
+class ProviderRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly retryable = false,
+  ) {
+    super(message);
+    this.name = 'ProviderRequestError';
+  }
+}
+
+function unwrapProviderResult<T>(result: { ok: true; value: T } | { ok: false; error: ProviderFailure }): T {
+  if (result.ok) return result.value;
+  throw new ProviderRequestError(result.error.message, result.error.status, result.error.retryable);
+}
+
 async function withRetry<T>(
   fn: () => Promise<T>,
   attempts = 5,
@@ -191,7 +208,7 @@ async function withRetry<T>(
       return await fn();
     } catch (error: any) {
       lastError = error;
-      if (error.status === 429) {
+      if (error.retryable === false) {
         throw lastError;
       }
       const errorMessage = error.message || 'An unknown API error occurred';
@@ -222,12 +239,12 @@ export function useProvingGroundEngine() {
             dispatch({ type: 'SET_ACTIVITY', payload: { message: `Contacting the teacher for question ${currentTurnNumber + 1}…` } });
             await withRetry(async () => {
                 const prompt = getTeacherQuestionPrompt(currentTurnNumber + 1);
-                const { rawRequest, rawResponse } = await runTeacherTurn({
+                const { rawRequest, rawResponse } = unwrapProviderResult(await runTeacherTurn({
                     prompt,
                     teacherConfig: config.teacher,
                     history: teacherHistory,
                     gradingScale: config.gradingScale,
-                });
+                }));
                 
                 const { thinking } = parseWithThinking(rawResponse, config.teacher);
                 const toolCall = rawResponse.tool_calls ? rawResponse.tool_calls[0] : null;
@@ -236,7 +253,7 @@ export function useProvingGroundEngine() {
                     const args = JSON.parse(toolCall.function.arguments);
                     dispatch({ type: 'PROCESS_TEACHER_QUESTION', payload: { question: args.next_question, rawRequest, rawResponse, thinking, tool_calls: rawResponse.tool_calls || [] } });
                 } else {
-                    throw new Error("Teacher failed to call the 'askQuestion' tool when expected.");
+                    throw new ProviderRequestError("Teacher did not use the required askQuestion tool. Choose a teacher model with function calling enabled.");
                 }
             }, 5, 3000, (message) => dispatch({ type: 'SET_ACTIVITY', payload: { message } }));
         } 
@@ -247,16 +264,16 @@ export function useProvingGroundEngine() {
             dispatch({ type: 'SET_ACTIVITY', payload: { message: 'Contacting the student for an answer…' } });
             await withRetry(async () => {
                 const studentPrompt = getStudentPrompt(completedTurns, lastTurn.question, currentTurnNumber);
-                const { rawRequest, rawResponse } = await runStudentTurn({
+                const { rawRequest, rawResponse } = unwrapProviderResult(await runStudentTurn({
                     prompt: studentPrompt,
                     studentConfig: config.student,
-                });
+                }));
                 const { clean: studentAnswer, thinking } = parseWithThinking(rawResponse, config.student);
 
                 if (studentAnswer) {
                     dispatch({ type: 'PROCESS_STUDENT_ANSWER', payload: { answer: studentAnswer, rawRequest, rawResponse, thinking } });
                 } else {
-                    throw new Error("Student returned an empty response.");
+                    throw new ProviderRequestError('Student returned an empty response.', undefined, true);
                 }
             }, 5, 3000, (message) => dispatch({ type: 'SET_ACTIVITY', payload: { message } }));
         }
@@ -266,12 +283,12 @@ export function useProvingGroundEngine() {
             dispatch({ type: 'SET_ACTIVITY', payload: { message: 'Contacting the teacher for an evaluation…' } });
             await withRetry(async () => {
                 const prompt = getTeacherEvaluationPrompt(lastTurn);
-                const { rawRequest, rawResponse } = await runTeacherTurn({
+                const { rawRequest, rawResponse } = unwrapProviderResult(await runTeacherTurn({
                     prompt,
                     teacherConfig: config.teacher,
                     history: teacherHistory,
                     gradingScale: config.gradingScale,
-                });
+                }));
                 
                 const { thinking } = parseWithThinking(rawResponse, config.teacher);
                 const toolCall = rawResponse.tool_calls ? rawResponse.tool_calls[0] : null;
@@ -285,7 +302,7 @@ export function useProvingGroundEngine() {
                     };
                     dispatch({ type: 'PROCESS_TEACHER_EVALUATION', payload: { evaluation, rawRequest, rawResponse, thinking, tool_calls: rawResponse.tool_calls || [] } });
                 } else {
-                    throw new Error("Teacher failed to call the 'provideEvaluation' tool when expected.");
+                    throw new ProviderRequestError("Teacher did not use the required provideEvaluation tool. Choose a teacher model with function calling enabled.");
                 }
             }, 5, 3000, (message) => dispatch({ type: 'SET_ACTIVITY', payload: { message } }));
         }
@@ -294,12 +311,12 @@ export function useProvingGroundEngine() {
              dispatch({ type: 'SET_ACTIVITY', payload: { message: 'Contacting the teacher for the final report…' } });
              await withRetry(async () => {
                 const prompt = getTeacherSummaryPrompt();
-                const { rawRequest, rawResponse } = await runTeacherTurn({
+                const { rawRequest, rawResponse } = unwrapProviderResult(await runTeacherTurn({
                     prompt,
                     teacherConfig: config.teacher,
                     history: teacherHistory,
                     gradingScale: config.gradingScale,
-                });
+                }));
                 
                 const toolCall = rawResponse.tool_calls ? rawResponse.tool_calls[0] : null;
 
@@ -308,7 +325,7 @@ export function useProvingGroundEngine() {
                     dispatch({ type: 'SET_FINAL_SUMMARY', payload: { summary: args.final_summary, rawRequest, rawResponse }});
                     dispatch({ type: 'FINISH_EXAM' });
                 } else {
-                   throw new Error("Teacher failed to call the 'provideSummary' tool when expected.");
+                   throw new ProviderRequestError("Teacher did not use the required provideSummary tool. Choose a teacher model with function calling enabled.");
                 }
             }, 5, 3000, (message) => dispatch({ type: 'SET_ACTIVITY', payload: { message } }));
         }

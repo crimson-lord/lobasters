@@ -2,6 +2,7 @@
 
 import OpenAI from 'openai';
 import { ProvingGroundAgentConfig, ApiMessage, ModelOutput, GradingScale } from '../types';
+import { ProviderResult, toProviderFailure } from './provider-result';
 
 const getTools = (gradingScale: GradingScale): OpenAI.Chat.Completions.ChatCompletionTool[] => {
     let validRanks: string[] = ['S', 'A', 'B', 'F'];
@@ -83,58 +84,59 @@ interface TeacherTurnInput {
 
 export async function runTeacherTurn(
   input: TeacherTurnInput
-): Promise<ModelOutput> {
-  const { prompt, teacherConfig, history, gradingScale } = input;
+): Promise<ProviderResult<ModelOutput>> {
+  try {
+    const { prompt, teacherConfig, history, gradingScale } = input;
 
-  const apiKey = teacherConfig.apiKey || process.env.OPENAI_API_KEY;
+    const apiKey = teacherConfig.apiKey || process.env.OPENAI_API_KEY;
 
-  if (!apiKey) {
-    throw new Error("No API key found. Please enter your API key in the Teacher Settings.");
-  }
-
-  const openai = new OpenAI({
-    baseURL: teacherConfig.baseURL.trim().replace(/\/$/, ''),
-    apiKey: apiKey,
-    defaultHeaders: {
-      "HTTP-Referer": "https://lobasters.vercel.app",
-      "X-Title": "Lobasters",
+    if (!apiKey) {
+      return { ok: false, error: { message: 'No API key found. Enter a key in Teacher Settings.', retryable: false } };
     }
-  });
 
-  const slicedHistory = teacherConfig.maxHistory ? history.slice(-teacherConfig.maxHistory) : history;
+    const openai = new OpenAI({
+      baseURL: teacherConfig.baseURL.trim().replace(/\/$/, ''),
+      apiKey: apiKey,
+      defaultHeaders: {
+        "HTTP-Referer": "https://lobasters.vercel.app",
+        "X-Title": "Lobasters",
+      }
+    });
 
-  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: 'system', content: teacherConfig.systemPrompt },
-    ...slicedHistory,
-    { role: 'user', content: prompt },
-  ];
+    const slicedHistory = teacherConfig.maxHistory ? history.slice(-teacherConfig.maxHistory) : history;
 
-  const tools = getTools(gradingScale);
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: 'system', content: teacherConfig.systemPrompt },
+      ...slicedHistory,
+      { role: 'user', content: prompt },
+    ];
 
-  const requestPayload: any = {
-    model: teacherConfig.modelName,
-    messages: messages,
-    tools: tools,
-    tool_choice: 'auto' as const,
-    temperature: teacherConfig.temperature,
-    max_tokens: teacherConfig.maxTokens,
-    ...(teacherConfig.canThink ? { extra_body: { include_reasoning: true } } : {}),
-  };
+    const tools = getTools(gradingScale);
 
-  const response = await openai.chat.completions.create(requestPayload);
+    const requestPayload: any = {
+      model: teacherConfig.modelName,
+      messages: messages,
+      tools: tools,
+      tool_choice: 'auto' as const,
+      temperature: teacherConfig.temperature,
+      max_tokens: teacherConfig.maxTokens,
+      ...(teacherConfig.canThink ? { extra_body: { include_reasoning: true } } : {}),
+    };
 
-  if (!response.choices || response.choices.length === 0) {
-    throw new Error('Teacher model returned no choices in API response.');
-  }
+    const response = await openai.chat.completions.create(requestPayload);
 
-  const message = response.choices[0].message;
+    if (!response.choices || response.choices.length === 0) {
+      return { ok: false, error: { message: 'Teacher model returned no choices in its response.', retryable: true } };
+    }
+
+    const message = response.choices[0].message;
   
-  if (!message) {
-      throw new Error('Teacher model returned an empty message object.');
-  }
+    if (!message) {
+      return { ok: false, error: { message: 'Teacher model returned an empty response.', retryable: true } };
+    }
 
-  return {
-    rawRequest: requestPayload,
-    rawResponse: message,
-  };
+    return { ok: true, value: { rawRequest: requestPayload, rawResponse: message } };
+  } catch (error) {
+    return { ok: false, error: toProviderFailure(error) };
+  }
 }
