@@ -59,6 +59,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import jsPDF from 'jspdf';
 import { PageNavigationTools } from '@/components/webmcp/page-navigation-tools';
+import { ExaminationConfigurationTools } from '@/components/webmcp/examination-configuration-tools';
 
 export const dynamic = 'force-dynamic';
 
@@ -220,6 +221,29 @@ export default function ProvingGroundPage() {
   return (
       <div className="container mx-auto p-4 md:p-8 glass-mode:bg-transparent bg-background">
         <PageNavigationTools page="examination" />
+        <ExaminationConfigurationTools
+          step={step}
+          teacherConfig={teacherConfig}
+          setTeacherConfig={setTeacherConfig}
+          studentConfig={studentConfig}
+          setStudentConfig={setStudentConfig}
+          examConfig={examConfig}
+          setExamConfig={setExamConfig}
+          promptModeTeacher={promptModeTeacher}
+          setPromptModeTeacher={setPromptModeTeacher}
+          promptModeStudent={promptModeStudent}
+          setPromptModeStudent={setPromptModeStudent}
+          state={state}
+          onContinueFromModels={() => setStep('exam-params')}
+          onContinueToReview={() => setStep('review')}
+          onStart={handleStartExam}
+          onReset={handleReset}
+          onDownloadReport={format => {
+            if (!state.transcript) return;
+            if (format === 'pdf') generatePdf(state.transcript);
+            else generateMarkdown(state.transcript);
+          }}
+        />
         {renderContent()}
       </div>
   );
