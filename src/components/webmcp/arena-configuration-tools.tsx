@@ -37,6 +37,10 @@ type ArenaConfigurationToolsProps = {
   onSelectTemplate: (template: ArenaTemplate) => void;
   onContinueFromModels: () => void;
   onContinueToPrompts: () => void;
+  onStartArena: () => Promise<void>;
+  isArenaRunning: boolean;
+  onStopArena: () => void;
+  onStartNewArena: () => void;
 };
 
 type CustomToolInput = {
@@ -592,6 +596,10 @@ export function ArenaConfigurationTools({
   onSelectTemplate,
   onContinueFromModels,
   onContinueToPrompts,
+  onStartArena,
+  isArenaRunning,
+  onStopArena,
+  onStartNewArena,
 }: ArenaConfigurationToolsProps) {
   useEffect(() => {
     const controller = new AbortController();
@@ -759,6 +767,49 @@ export function ArenaConfigurationTools({
             );
           },
         });
+
+        register({
+          name: 'lobasters_start_arena',
+          description:
+            'Start the configured Arena session. This begins live provider requests using the models and API keys configured by the researcher, and may consume provider credits. For Custom Arena, both complete system prompts must be present first.',
+          inputSchema: noInputSchema,
+          execute: async () => {
+            if (
+              isCustom
+              && (!agentAConfig.systemPrompt.trim() || !agentBConfig.systemPrompt.trim())
+            ) {
+              throw new Error('Custom Arena requires complete system prompts for both models before it can start.');
+            }
+            await onStartArena();
+            return text('Arena is starting. Live model output will appear in the Arena session once the configured provider responds.');
+          },
+        });
+        return;
+      }
+
+      if (step === 'debate') {
+        if (isArenaRunning) {
+          register({
+            name: 'lobasters_stop_arena',
+            description: 'Stop the live Arena session and record it as a draw. This ends the current model exchange.',
+            inputSchema: noInputSchema,
+            execute: () => {
+              onStopArena();
+              return text('Stopping the Arena session.');
+            },
+          });
+        }
+
+        register({
+          name: 'lobasters_start_new_arena',
+          description:
+            'Discard the current Arena session and return to template selection for a new Arena. Current session configuration and transcript are cleared.',
+          inputSchema: noInputSchema,
+          execute: () => {
+            onStartNewArena();
+            return text('Starting a new Arena. Returning to template selection.');
+          },
+        });
       }
     };
 
@@ -783,6 +834,10 @@ export function ArenaConfigurationTools({
     onSelectTemplate,
     onContinueFromModels,
     onContinueToPrompts,
+    onStartArena,
+    isArenaRunning,
+    onStopArena,
+    onStartNewArena,
   ]);
 
   return null;

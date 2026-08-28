@@ -316,6 +316,10 @@ export default function DebatePage() {
           onSelectTemplate={applyTemplate}
           onContinueFromModels={() => setStep('topic')}
           onContinueToPrompts={() => setStep('review')}
+          onStartArena={handleStartDebate}
+          isArenaRunning={state.isDebating}
+          onStopArena={handleStopDebate}
+          onStartNewArena={handleReset}
         />
         {renderContent()}
       </div>
