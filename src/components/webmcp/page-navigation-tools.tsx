@@ -24,7 +24,10 @@ export function PageNavigationTools({ page }: PageNavigationToolsProps) {
     let attempts = 0;
 
     const registerTools = () => {
-      const modelContext = document.modelContext;
+      // Chrome's early implementation exposed the API on navigator; newer
+      // WebMCP browsers use document. Supporting both keeps the same tools
+      // discoverable across challenge test environments.
+      const modelContext = document.modelContext ?? navigator.modelContext;
       // Some browser agents inject the experimental WebMCP API immediately
       // after React hydrates. Retry briefly instead of permanently missing the
       // one registration opportunity.

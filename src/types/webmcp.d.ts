@@ -21,3 +21,10 @@ interface Document {
     registerTool: (tool: WebMcpTool, options?: { signal?: AbortSignal }) => Promise<void>;
   };
 }
+
+interface Navigator {
+  /** Compatibility alias used by earlier WebMCP browser implementations. */
+  modelContext?: {
+    registerTool: (tool: WebMcpTool, options?: { signal?: AbortSignal }) => Promise<void>;
+  };
+}
