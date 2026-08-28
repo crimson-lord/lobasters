@@ -2,10 +2,12 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
+import { PageNavigationTools } from '@/components/webmcp/page-navigation-tools';
 
 export default function PrivacyPage() {
   return (
     <div className="container mx-auto p-4 md:p-8">
+      <PageNavigationTools page="privacy" />
       <Card>
         <CardHeader>
           <CardTitle>Privacy Policy</CardTitle>

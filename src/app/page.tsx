@@ -13,6 +13,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { PageNavigationTools } from '@/components/webmcp/page-navigation-tools';
 
 export default function Home() {
   const router = useRouter();
@@ -75,6 +76,7 @@ export default function Home() {
 
   return (
     <TooltipProvider>
+      <PageNavigationTools page="home" />
       <div className={cn(
         "flex flex-col min-h-screen text-foreground overflow-x-hidden selection:bg-primary/30",
         "bg-background glass-mode:bg-transparent transition-colors duration-500"
