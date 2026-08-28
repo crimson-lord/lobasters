@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import type {
   AgentConfig,
   AgentID,
+  DebateConfig,
   Depth,
   ReasoningCaptureMethod,
   ScenarioType,
@@ -13,6 +14,7 @@ import type {
 
 type ArenaTemplate = Exclude<ScenarioType, null>;
 type ArenaConfigurationStep = 'scenario' | 'agents' | 'topic' | 'review' | 'debate';
+type PromptMode = 'template' | 'custom';
 type ToolTermination =
   | 'private_to_caller'
   | 'caller_wins'
@@ -26,7 +28,15 @@ type ArenaConfigurationToolsProps = {
   setAgentAConfig: (config: AgentConfig) => void;
   agentBConfig: AgentConfig;
   setAgentBConfig: (config: AgentConfig) => void;
+  sessionConfig: Omit<DebateConfig, 'agentA' | 'agentB'>;
+  setSessionConfig: (config: Omit<DebateConfig, 'agentA' | 'agentB'>) => void;
+  promptModeA: PromptMode;
+  setPromptModeA: (mode: PromptMode) => void;
+  promptModeB: PromptMode;
+  setPromptModeB: (mode: PromptMode) => void;
   onSelectTemplate: (template: ArenaTemplate) => void;
+  onContinueFromModels: () => void;
+  onContinueToPrompts: () => void;
 };
 
 type CustomToolInput = {
@@ -68,6 +78,12 @@ const templateInputSchema = {
     },
   },
   required: ['template'],
+};
+
+const noInputSchema = {
+  type: 'object' as const,
+  additionalProperties: false,
+  properties: {},
 };
 
 const customToolSchema = {
@@ -455,6 +471,108 @@ function configurationDescription(agentId: AgentID, config: AgentConfig) {
   ].join('\n');
 }
 
+function templateLabel(scenarioType: ScenarioType) {
+  if (scenarioType === 'sales') return 'Sales Simulation';
+  if (scenarioType === 'hiring') return 'Salary Negotiation';
+  if (scenarioType === 'debate') return 'Classic Debate';
+  if (scenarioType === 'custom') return 'Custom';
+  return 'unselected';
+}
+
+function sessionInputSchema(scenarioType: ScenarioType): WebMcpTool['inputSchema'] {
+  const properties: Record<string, unknown> = {
+    agentSpeaksFirst: {
+      type: 'string',
+      enum: ['A', 'B'],
+      description: 'Which model takes the first turn.',
+    },
+  };
+
+  if (scenarioType === 'debate') {
+    properties.topic = {
+      type: 'string',
+      description: 'The complete proposition, topic, or scenario the models will debate.',
+    };
+    properties.extraRules = {
+      type: 'string',
+      description: 'Optional additional rules or constraints. Use an empty string to clear existing rules.',
+    };
+    properties.agentForTopic = {
+      type: 'string',
+      enum: ['A', 'B'],
+      description: 'Which model argues FOR the topic. This mirrors the existing researcher control.',
+    };
+  }
+
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties,
+  };
+}
+
+function systemPromptInputSchema(isCustom: boolean): WebMcpTool['inputSchema'] {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      modelASystemPrompt: {
+        type: 'string',
+        description: isCustom
+          ? 'Required complete system prompt for Model A.'
+          : 'A complete replacement for Model A’s current generated system prompt. Omit to keep it unchanged.',
+      },
+      modelBSystemPrompt: {
+        type: 'string',
+        description: isCustom
+          ? 'Required complete system prompt for Model B.'
+          : 'A complete replacement for Model B’s current generated system prompt. Omit to keep it unchanged.',
+      },
+    },
+    required: isCustom ? ['modelASystemPrompt', 'modelBSystemPrompt'] : undefined,
+  };
+}
+
+function sessionDescription(
+  scenarioType: ScenarioType,
+  config: Omit<DebateConfig, 'agentA' | 'agentB'>,
+) {
+  const current: Record<string, unknown> = {
+    template: templateLabel(scenarioType),
+    agentSpeaksFirst: config.agentSpeaksFirst,
+  };
+  if (scenarioType === 'debate') {
+    current.topic = config.topic;
+    current.extraRules = config.extraRules;
+    current.agentForTopic = config.agentIsPro;
+  }
+
+  return [
+    `Complete the ${templateLabel(scenarioType)} Arena session survey and continue to system-prompt review.`,
+    scenarioType === 'debate'
+      ? 'Set the debate topic, optional extra rules, turn order, and which model argues FOR the topic. Omitted values are preserved.'
+      : 'Set the turn order. Omit agentSpeaksFirst to preserve the current selection.',
+    `Current live session settings:\n${JSON.stringify(current, null, 2)}`,
+  ].join('\n');
+}
+
+function promptsDescription(
+  scenarioType: ScenarioType,
+  agentAConfig: AgentConfig,
+  agentBConfig: AgentConfig,
+  promptModeA: PromptMode,
+  promptModeB: PromptMode,
+) {
+  const isCustom = scenarioType === 'custom';
+  return [
+    isCustom
+      ? 'Write the complete system prompts for both Custom Arena models in one call.'
+      : 'Review both generated Arena system prompts in one call. Omit either prompt to keep it exactly as written, or supply a complete replacement to edit it.',
+    `Current Model A prompt (${promptModeA} mode):\n${agentAConfig.systemPrompt}`,
+    `Current Model B prompt (${promptModeB} mode):\n${agentBConfig.systemPrompt}`,
+  ].join('\n\n');
+}
+
 /**
  * Provides an agent-oriented control surface over the existing Arena forms.
  * Human researchers continue to use the same visible controls and state.
@@ -465,7 +583,15 @@ export function ArenaConfigurationTools({
   setAgentAConfig,
   agentBConfig,
   setAgentBConfig,
+  sessionConfig,
+  setSessionConfig,
+  promptModeA,
+  setPromptModeA,
+  promptModeB,
+  setPromptModeB,
   onSelectTemplate,
+  onContinueFromModels,
+  onContinueToPrompts,
 }: ArenaConfigurationToolsProps) {
   useEffect(() => {
     const controller = new AbortController();
@@ -528,6 +654,111 @@ export function ArenaConfigurationTools({
 
         registerAgent('A', agentAConfig, setAgentAConfig);
         registerAgent('B', agentBConfig, setAgentBConfig);
+
+        register({
+          name: 'lobasters_continue_arena_setup',
+          description:
+            sessionConfig.scenarioType === 'debate'
+              ? 'Continue after configuring both models to the Classic Debate topic, rules, and turn-order survey.'
+              : 'Continue after configuring both models to the Arena turn-order survey.',
+          inputSchema: noInputSchema,
+          execute: () => {
+            onContinueFromModels();
+            return text(
+              sessionConfig.scenarioType === 'debate'
+                ? 'Opening the Classic Debate topic, rules, and turn-order survey.'
+                : 'Opening the Arena turn-order survey.',
+            );
+          },
+        });
+        return;
+      }
+
+      if (step === 'topic' && sessionConfig.scenarioType) {
+        register({
+          name: 'lobasters_configure_arena_session',
+          description: sessionDescription(sessionConfig.scenarioType, sessionConfig),
+          inputSchema: sessionInputSchema(sessionConfig.scenarioType),
+          execute: input => {
+            const next = { ...sessionConfig };
+
+            if (hasOwn(input, 'agentSpeaksFirst')) {
+              const first = requireString(input, 'agentSpeaksFirst') as AgentID;
+              if (first !== 'A' && first !== 'B') throw new Error('agentSpeaksFirst must be A or B.');
+              next.agentSpeaksFirst = first;
+            }
+
+            if (sessionConfig.scenarioType === 'debate') {
+              if (hasOwn(input, 'topic')) next.topic = requireString(input, 'topic');
+              if (hasOwn(input, 'extraRules')) next.extraRules = requireString(input, 'extraRules');
+              if (hasOwn(input, 'agentForTopic')) {
+                const agentForTopic = requireString(input, 'agentForTopic') as AgentID;
+                if (agentForTopic !== 'A' && agentForTopic !== 'B') {
+                  throw new Error('agentForTopic must be A or B.');
+                }
+                next.agentIsPro = agentForTopic;
+              }
+              if (!next.topic.trim()) {
+                throw new Error('A non-empty topic is required for the Classic Debate template.');
+              }
+            }
+
+            setSessionConfig(next);
+            onContinueToPrompts();
+            return text(
+              `Arena session settings saved. Opening system-prompt review with Model ${next.agentSpeaksFirst} speaking first.`,
+            );
+          },
+        });
+        return;
+      }
+
+      if (step === 'review' && sessionConfig.scenarioType) {
+        const isCustom = sessionConfig.scenarioType === 'custom';
+        register({
+          name: 'lobasters_finalize_arena_system_prompts',
+          description: promptsDescription(
+            sessionConfig.scenarioType,
+            agentAConfig,
+            agentBConfig,
+            promptModeA,
+            promptModeB,
+          ),
+          inputSchema: systemPromptInputSchema(isCustom),
+          execute: input => {
+            const hasModelAPrompt = hasOwn(input, 'modelASystemPrompt');
+            const hasModelBPrompt = hasOwn(input, 'modelBSystemPrompt');
+            const modelAPrompt = hasModelAPrompt ? requireString(input, 'modelASystemPrompt') : agentAConfig.systemPrompt;
+            const modelBPrompt = hasModelBPrompt ? requireString(input, 'modelBSystemPrompt') : agentBConfig.systemPrompt;
+
+            if (isCustom && (!hasModelAPrompt || !hasModelBPrompt)) {
+              throw new Error('Custom Arena requires complete system prompts for both Model A and Model B.');
+            }
+            if (hasModelAPrompt && !modelAPrompt.trim()) {
+              throw new Error('modelASystemPrompt cannot be empty when supplied.');
+            }
+            if (hasModelBPrompt && !modelBPrompt.trim()) {
+              throw new Error('modelBSystemPrompt cannot be empty when supplied.');
+            }
+
+            if (hasModelAPrompt) {
+              setPromptModeA('custom');
+              setAgentAConfig({ ...agentAConfig, systemPrompt: modelAPrompt });
+            }
+            if (hasModelBPrompt) {
+              setPromptModeB('custom');
+              setAgentBConfig({ ...agentBConfig, systemPrompt: modelBPrompt });
+            }
+
+            return text(
+              [
+                'Arena system prompts finalized.',
+                `Model A: ${hasModelAPrompt ? 'replaced with the supplied custom prompt' : 'kept exactly as written'}.`,
+                `Model B: ${hasModelBPrompt ? 'replaced with the supplied custom prompt' : 'kept exactly as written'}.`,
+              ].join(' '),
+            );
+          },
+        });
       }
     };
 
@@ -541,9 +772,17 @@ export function ArenaConfigurationTools({
     step,
     agentAConfig,
     agentBConfig,
+    sessionConfig,
+    promptModeA,
+    promptModeB,
     setAgentAConfig,
     setAgentBConfig,
+    setSessionConfig,
+    setPromptModeA,
+    setPromptModeB,
     onSelectTemplate,
+    onContinueFromModels,
+    onContinueToPrompts,
   ]);
 
   return null;

@@ -307,7 +307,15 @@ export default function DebatePage() {
           setAgentAConfig={setAgentAConfig}
           agentBConfig={agentBConfig}
           setAgentBConfig={setAgentBConfig}
+          sessionConfig={debateConfig}
+          setSessionConfig={setDebateConfig}
+          promptModeA={promptModeA}
+          setPromptModeA={setPromptModeA}
+          promptModeB={promptModeB}
+          setPromptModeB={setPromptModeB}
           onSelectTemplate={applyTemplate}
+          onContinueFromModels={() => setStep('topic')}
+          onContinueToPrompts={() => setStep('review')}
         />
         {renderContent()}
       </div>
