@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import Link from 'next/link';
+import { PageNavigationTools } from '@/components/webmcp/page-navigation-tools';
 
 
 export const dynamic = 'force-dynamic';
@@ -208,6 +209,7 @@ export default function LM0Page() {
 
   return (
     <div className="h-screen max-h-screen w-full flex flex-col text-foreground overflow-hidden">
+       <PageNavigationTools page="lab" />
        <ScrollArea className="h-full w-full">
             <div className="p-4 md:p-8">
                 {renderConfigSteps()}

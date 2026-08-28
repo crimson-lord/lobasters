@@ -58,6 +58,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import jsPDF from 'jspdf';
+import { PageNavigationTools } from '@/components/webmcp/page-navigation-tools';
 
 export const dynamic = 'force-dynamic';
 
@@ -218,6 +219,7 @@ export default function ProvingGroundPage() {
 
   return (
       <div className="container mx-auto p-4 md:p-8 glass-mode:bg-transparent bg-background">
+        <PageNavigationTools page="examination" />
         {renderContent()}
       </div>
   );

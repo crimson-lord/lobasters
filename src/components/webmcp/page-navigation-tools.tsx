@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 
 type PageNavigationToolsProps = {
-  page: 'home' | 'terms' | 'privacy';
+  page: 'home' | 'terms' | 'privacy' | 'dashboard' | 'arena' | 'examination' | 'lab' | 'settings';
 };
 
 const noInput = { type: 'object' as const, properties: {} };
@@ -80,14 +80,56 @@ export function PageNavigationTools({ page }: PageNavigationToolsProps) {
             return text('Opened the public Lobasters GitHub repository in a new tab.');
           },
         });
-      } else {
+      } else if (page === 'dashboard') {
         register({
-          name: 'lobasters_return_home',
-          description: `Return from the Lobasters ${page === 'terms' ? 'Terms of Service' : 'Privacy Policy'} to the landing page.`,
+          name: 'lobasters_enter_arena',
+          description: 'Open Arena to configure and run a structured debate between two models.',
           inputSchema: noInput,
           execute: () => {
-            window.location.assign('/');
-            return text('Returning to the Lobasters landing page.');
+            window.location.assign('/debate');
+            return text('Opening Arena.');
+          },
+        });
+        register({
+          name: 'lobasters_enter_examination',
+          description: 'Open Examination to configure and run a teacher-versus-student model evaluation.',
+          inputSchema: noInput,
+          execute: () => {
+            window.location.assign('/proving-ground');
+            return text('Opening Examination.');
+          },
+        });
+        register({
+          name: 'lobasters_enter_lab',
+          description: 'Open LAB, the autonomous agent environment with a virtual workspace.',
+          inputSchema: noInput,
+          execute: () => {
+            window.location.assign('/lm0');
+            return text('Opening LAB.');
+          },
+        });
+        register({
+          name: 'lobasters_open_settings',
+          description: 'Open Lobasters settings for appearance and workspace preferences.',
+          inputSchema: noInput,
+          execute: () => {
+            window.location.assign('/settings');
+            return text('Opening Settings.');
+          },
+        });
+      } else {
+        register({
+          name: page === 'terms' || page === 'privacy'
+            ? 'lobasters_return_home'
+            : 'lobasters_return_to_dashboard',
+          description: page === 'terms' || page === 'privacy'
+            ? `Return from the Lobasters ${page === 'terms' ? 'Terms of Service' : 'Privacy Policy'} to the landing page.`
+            : `Return from ${page === 'arena' ? 'Arena' : page === 'examination' ? 'Examination' : page === 'lab' ? 'LAB' : 'Settings'} to the Lobasters dashboard.`,
+          inputSchema: noInput,
+          execute: () => {
+            const destination = page === 'terms' || page === 'privacy' ? '/' : '/dashboard';
+            window.location.assign(destination);
+            return text(destination === '/' ? 'Returning to the Lobasters landing page.' : 'Returning to the Lobasters dashboard.');
           },
         });
       }

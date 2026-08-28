@@ -21,6 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { PageNavigationTools } from '@/components/webmcp/page-navigation-tools';
 
 export const dynamic = 'force-dynamic';
 
@@ -145,6 +146,7 @@ export default function DashboardPage() {
         "flex h-screen w-full bg-background overflow-hidden",
         "glass-mode:bg-transparent transition-colors"
       )}>
+        <PageNavigationTools page="dashboard" />
         {/* Sidebar */}
         <aside className="w-64 border-r border-border bg-card/50 backdrop-blur-xl hidden md:flex flex-col glass-mode:bg-black/20">
             <div className="p-6">

@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { BackgroundSwitcher } from "./background-switcher";
 import { Switch } from "@/components/ui/switch";
 import { useEffect, useState } from "react";
+import { PageNavigationTools } from '@/components/webmcp/page-navigation-tools';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,6 +61,7 @@ export default function SettingsPage() {
 
     return (
         <div className="container mx-auto py-10 flex flex-col h-screen glass-mode:bg-transparent bg-background">
+            <PageNavigationTools page="settings" />
             <div className="flex-shrink-0">
                 <div className="flex justify-between items-center mb-8">
                     <h1 className="text-3xl font-bold">Settings</h1>
