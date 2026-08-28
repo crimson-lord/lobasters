@@ -19,67 +19,83 @@ function text(message: string) {
  */
 export function PageNavigationTools({ page }: PageNavigationToolsProps) {
   useEffect(() => {
-    const modelContext = document.modelContext;
-    if (!modelContext) return;
-
     const controller = new AbortController();
-    const register = (tool: WebMcpTool) => {
-      void modelContext.registerTool(tool, { signal: controller.signal }).catch(() => {
-        // Unsupported browsers and duplicate registrations should not affect
-        // the human-facing page.
-      });
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+
+    const registerTools = () => {
+      const modelContext = document.modelContext;
+      // Some browser agents inject the experimental WebMCP API immediately
+      // after React hydrates. Retry briefly instead of permanently missing the
+      // one registration opportunity.
+      if (!modelContext) {
+        if (attempts++ < 50) retryTimer = setTimeout(registerTools, 100);
+        return;
+      }
+
+      const register = (tool: WebMcpTool) => {
+        void modelContext.registerTool(tool, { signal: controller.signal }).catch(() => {
+          // Unsupported browsers and duplicate registrations should not affect
+          // the human-facing page.
+        });
+      };
+
+      if (page === 'home') {
+        register({
+          name: 'lobasters_open_dashboard',
+          description: 'Open the Lobasters main dashboard, where all labs are available.',
+          inputSchema: noInput,
+          execute: () => {
+            window.location.assign('/dashboard');
+            return text('Opening the Lobasters dashboard.');
+          },
+        });
+        register({
+          name: 'lobasters_open_terms',
+          description: 'Open Lobasters Terms of Service.',
+          inputSchema: noInput,
+          execute: () => {
+            window.location.assign('/terms');
+            return text('Opening the Terms of Service.');
+          },
+        });
+        register({
+          name: 'lobasters_open_privacy',
+          description: 'Open the Lobasters Privacy Policy.',
+          inputSchema: noInput,
+          execute: () => {
+            window.location.assign('/privacy');
+            return text('Opening the Privacy Policy.');
+          },
+        });
+        register({
+          name: 'lobasters_open_github_repository',
+          description: 'Open the public Lobasters GitHub repository in a new browser tab.',
+          inputSchema: noInput,
+          execute: () => {
+            window.open('https://github.com/crimson-lord/lobasters', '_blank', 'noopener,noreferrer');
+            return text('Opened the public Lobasters GitHub repository in a new tab.');
+          },
+        });
+      } else {
+        register({
+          name: 'lobasters_return_home',
+          description: `Return from the Lobasters ${page === 'terms' ? 'Terms of Service' : 'Privacy Policy'} to the landing page.`,
+          inputSchema: noInput,
+          execute: () => {
+            window.location.assign('/');
+            return text('Returning to the Lobasters landing page.');
+          },
+        });
+      }
     };
 
-    if (page === 'home') {
-      register({
-        name: 'lobasters_open_dashboard',
-        description: 'Open the Lobasters main dashboard, where all labs are available.',
-        inputSchema: noInput,
-        execute: () => {
-          window.location.assign('/dashboard');
-          return text('Opening the Lobasters dashboard.');
-        },
-      });
-      register({
-        name: 'lobasters_open_terms',
-        description: 'Open Lobasters Terms of Service.',
-        inputSchema: noInput,
-        execute: () => {
-          window.location.assign('/terms');
-          return text('Opening the Terms of Service.');
-        },
-      });
-      register({
-        name: 'lobasters_open_privacy',
-        description: 'Open the Lobasters Privacy Policy.',
-        inputSchema: noInput,
-        execute: () => {
-          window.location.assign('/privacy');
-          return text('Opening the Privacy Policy.');
-        },
-      });
-      register({
-        name: 'lobasters_open_github_repository',
-        description: 'Open the public Lobasters GitHub repository in a new browser tab.',
-        inputSchema: noInput,
-        execute: () => {
-          window.open('https://github.com/crimson-lord/lobasters', '_blank', 'noopener,noreferrer');
-          return text('Opened the public Lobasters GitHub repository in a new tab.');
-        },
-      });
-    } else {
-      register({
-        name: 'lobasters_return_home',
-        description: `Return from the Lobasters ${page === 'terms' ? 'Terms of Service' : 'Privacy Policy'} to the landing page.`,
-        inputSchema: noInput,
-        execute: () => {
-          window.location.assign('/');
-          return text('Returning to the Lobasters landing page.');
-        },
-      });
-    }
+    registerTools();
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [page]);
 
   return null;
