@@ -10,8 +10,9 @@ type WebMcpTool = {
     type: 'object';
     properties?: Record<string, unknown>;
     required?: string[];
+    additionalProperties?: boolean;
   };
-  execute: (input: Record<string, never>) =>
+  execute: (input: Record<string, unknown>) =>
     | { content: WebMcpContent[] }
     | Promise<{ content: WebMcpContent[] }>;
 };

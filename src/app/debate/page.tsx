@@ -51,6 +51,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { PageNavigationTools } from '@/components/webmcp/page-navigation-tools';
+import { ArenaConfigurationTools } from '@/components/webmcp/arena-configuration-tools';
 
 export const dynamic = 'force-dynamic';
 
@@ -300,6 +301,14 @@ export default function DebatePage() {
   return (
       <div className="container mx-auto p-4 md:p-8 glass-mode:bg-transparent bg-background">
         <PageNavigationTools page="arena" />
+        <ArenaConfigurationTools
+          step={step}
+          agentAConfig={agentAConfig}
+          setAgentAConfig={setAgentAConfig}
+          agentBConfig={agentBConfig}
+          setAgentBConfig={setAgentBConfig}
+          onSelectTemplate={applyTemplate}
+        />
         {renderContent()}
       </div>
   );
