@@ -148,6 +148,11 @@ const agentConfigurationInputSchema = {
       type: 'string',
       description: 'OpenAI-compatible API base URL. Lobasters adds https:// when no protocol is supplied.',
     },
+    apiKey: {
+      type: 'string',
+      description:
+        'Provider API key to save for this model. This value is write-only: Lobasters never includes the saved key in tool discovery or tool results.',
+    },
     enableManualTool: {
       type: 'boolean',
       description: 'Enable the private read_manual tool.',
@@ -334,7 +339,8 @@ function publicAgentConfiguration(config: AgentConfig) {
     maxChatMessages: config.maxHistory ?? null,
     maxTokens: config.maxTokens ?? 4096,
     availableTools: [...builtInTools, ...config.customTools.map(describeTool)],
-    note: 'The API key is intentionally preserved by edits but never exposed to WebMCP.',
+    apiKeyStatus: config.apiKey ? 'configured (write-only)' : 'not configured',
+    note: 'The API key is write-only. Its value is never exposed to WebMCP after it is supplied.',
   };
 }
 
@@ -400,6 +406,7 @@ function applyAgentPatch(
     const baseURL = requireString(input, 'baseURL');
     next.baseURL = baseURL && !/^https?:\/\//i.test(baseURL) ? `https://${baseURL}` : baseURL;
   }
+  if (hasOwn(input, 'apiKey')) next.apiKey = requireString(input, 'apiKey');
   if (hasOwn(input, 'enableManualTool')) {
     next.enableManualTool = requireBoolean(input, 'enableManualTool');
   }
