@@ -910,7 +910,9 @@ const requestReportDownload = (transcript: ProvingGroundTranscript, format: 'pdf
     }
     document.body.appendChild(form);
     form.submit();
-    form.remove();
+    // Do not remove this synchronously: Chromium may cancel a scripted form
+    // navigation before it reaches the attachment response.
+    window.setTimeout(() => form.remove(), 10_000);
 };
 
 const generatePdf = (transcript: ProvingGroundTranscript) => {
