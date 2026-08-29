@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type {
   GradingScale,
@@ -259,26 +259,36 @@ function patchSession(
   return next;
 }
 
-function completeExaminationDescription(
-  teacher: ProvingGroundAgentConfig,
-  student: ProvingGroundAgentConfig,
-  session: Omit<ProvingGroundConfig, 'teacher' | 'student'>,
-  teacherPromptMode: PromptMode,
-  studentPromptMode: PromptMode,
-) {
-  return [
-    'Configure the entire Examination in ONE WebMCP command. This is the primary agent-oriented setup tool.',
-    'It can set both models, the grading scale, question count, domains, and either complete system prompt. Omit a property to preserve its current value.',
-    'API keys are write-only: they can be supplied but are never exposed in discovery or results.',
-    'Current Teacher configuration:',
-    JSON.stringify(publicAgentConfiguration(teacher), null, 2),
-    'Current Student configuration:',
-    JSON.stringify(publicAgentConfiguration(student), null, 2),
-    'Current session configuration:',
-    JSON.stringify(session, null, 2),
-    `Current Teacher prompt (${teacherPromptMode} mode):\n${teacher.systemPrompt}`,
-    `Current Student prompt (${studentPromptMode} mode):\n${student.systemPrompt}`,
-  ].join('\n\n');
+const completeExaminationDescription = [
+  'Configure the entire Examination in ONE WebMCP command. This is the primary agent-oriented setup tool.',
+  'It can set both models, the grading scale, question count, domains, and either complete system prompt. Omit a property to preserve its current value.',
+  'Use lobasters_get_examination_configuration first when you need to inspect the live form values, including both editable system prompts.',
+  'API keys are write-only: they can be supplied but are never exposed in discovery or results.',
+].join('\n\n');
+
+function examinationConfigurationSnapshot({
+  teacherConfig,
+  studentConfig,
+  examConfig,
+  promptModeTeacher,
+  promptModeStudent,
+}: Pick<
+  ExaminationConfigurationToolsProps,
+  'teacherConfig' | 'studentConfig' | 'examConfig' | 'promptModeTeacher' | 'promptModeStudent'
+>) {
+  return JSON.stringify({
+    teacher: {
+      ...publicAgentConfiguration(teacherConfig),
+      systemPrompt: teacherConfig.systemPrompt,
+      systemPromptMode: promptModeTeacher,
+    },
+    student: {
+      ...publicAgentConfiguration(studentConfig),
+      systemPrompt: studentConfig.systemPrompt,
+      systemPromptMode: promptModeStudent,
+    },
+    session: examConfig,
+  }, null, 2);
 }
 
 function sanitizedTranscript(transcript: NonNullable<ProvingGroundState['transcript']>) {
@@ -307,6 +317,52 @@ export function ExaminationConfigurationTools({
   onReset,
   onDownloadReport,
 }: ExaminationConfigurationToolsProps) {
+  // WebMCP registrations persist in some browser runtimes even after their
+  // abort signal fires. Keep registrations stable while the researcher types;
+  // individual tools read this ref so they always operate on the live form.
+  const latestRef = useRef<ExaminationConfigurationToolsProps>({
+    step,
+    teacherConfig,
+    setTeacherConfig,
+    studentConfig,
+    setStudentConfig,
+    examConfig,
+    setExamConfig,
+    promptModeTeacher,
+    setPromptModeTeacher,
+    promptModeStudent,
+    setPromptModeStudent,
+    state,
+    onContinueToReview,
+    onStart,
+    onReset,
+    onDownloadReport,
+  });
+  latestRef.current = {
+    step,
+    teacherConfig,
+    setTeacherConfig,
+    studentConfig,
+    setStudentConfig,
+    examConfig,
+    setExamConfig,
+    promptModeTeacher,
+    setPromptModeTeacher,
+    promptModeStudent,
+    setPromptModeStudent,
+    state,
+    onContinueToReview,
+    onStart,
+    onReset,
+    onDownloadReport,
+  };
+
+  const registrationPhase = state.status === 'running'
+    ? 'running'
+    : state.status === 'finished' || state.status === 'error'
+      ? state.status
+      : step;
+
   useEffect(() => {
     const controller = new AbortController();
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -329,13 +385,16 @@ export function ExaminationConfigurationTools({
           name: 'lobasters_get_examination_status',
           description: 'Read the current live Examination phase and progress. Available while the examination is running.',
           inputSchema: noInputSchema,
-          execute: () => result(JSON.stringify({
-            status: state.status,
-            phase: state.currentPhase,
-            completedTurns: state.transcript?.turns.length ?? 0,
-            questionCount: state.config?.questionCount ?? null,
-            activity: state.activityMessage,
-          }, null, 2)),
+          execute: () => {
+            const { state: liveState } = latestRef.current;
+            return result(JSON.stringify({
+              status: liveState.status,
+              phase: liveState.currentPhase,
+              completedTurns: liveState.transcript?.turns.length ?? 0,
+              questionCount: liveState.config?.questionCount ?? null,
+              activity: liveState.activityMessage,
+            }, null, 2));
+          },
         });
         return;
       }
@@ -346,7 +405,11 @@ export function ExaminationConfigurationTools({
             name: 'lobasters_get_raw_examination_transcript',
             description: 'Return the complete raw Examination transcript, including requests and responses for every captured turn. API keys are removed.',
             inputSchema: noInputSchema,
-            execute: () => result(JSON.stringify(sanitizedTranscript(state.transcript!), null, 2)),
+            execute: () => {
+              const transcript = latestRef.current.state.transcript;
+              if (!transcript) throw new Error('No Examination transcript is available.');
+              return result(JSON.stringify(sanitizedTranscript(transcript), null, 2));
+            },
           });
           register({
             name: 'lobasters_copy_raw_examination_transcript',
@@ -354,7 +417,9 @@ export function ExaminationConfigurationTools({
               'Copy the complete API-key-sanitized raw Examination transcript to the system clipboard. This is a direct WebMCP action and does not use the researcher-facing button.',
             inputSchema: noInputSchema,
             execute: async () => {
-              const rawTranscript = JSON.stringify(sanitizedTranscript(state.transcript!), null, 2);
+              const transcript = latestRef.current.state.transcript;
+              if (!transcript) throw new Error('No Examination transcript is available.');
+              const rawTranscript = JSON.stringify(sanitizedTranscript(transcript), null, 2);
               try {
                 await navigator.clipboard.writeText(rawTranscript);
               } catch {
@@ -377,7 +442,7 @@ export function ExaminationConfigurationTools({
             execute: input => {
               const format = requireString(input, 'format') as ReportFormat;
               if (format !== 'pdf' && format !== 'markdown') throw new Error('format must be pdf or markdown.');
-              onDownloadReport(format);
+              latestRef.current.onDownloadReport(format);
               return result(`Downloading the completed Examination report as ${format === 'pdf' ? 'PDF' : 'Markdown'}.`);
             },
           });
@@ -387,7 +452,7 @@ export function ExaminationConfigurationTools({
           description: 'Clear the current Examination session and return to the Teacher and Student configuration surveys.',
           inputSchema: noInputSchema,
           execute: () => {
-            onReset();
+            latestRef.current.onReset();
             return result('Starting a new Examination. Returning to model configuration.');
           },
         });
@@ -396,22 +461,23 @@ export function ExaminationConfigurationTools({
 
       if (step === 'models') {
         register({
+          name: 'lobasters_get_examination_configuration',
+          description: 'Read the live Examination configuration, including both editable system prompts. API keys remain write-only.',
+          inputSchema: noInputSchema,
+          execute: () => result(examinationConfigurationSnapshot(latestRef.current)),
+        });
+        register({
           name: 'lobasters_configure_examination',
-          description: completeExaminationDescription(
-            teacherConfig,
-            studentConfig,
-            examConfig,
-            promptModeTeacher,
-            promptModeStudent,
-          ),
+          description: completeExaminationDescription,
           inputSchema: completeExaminationInputSchema,
           execute: (input: Record<string, unknown>) => {
+            const current = latestRef.current;
             const teacherInput = optionalObject(input, 'teacher');
             const studentInput = optionalObject(input, 'student');
             const sessionInput = optionalObject(input, 'session');
-            const nextTeacher = teacherInput ? patchAgent(teacherConfig, teacherInput) : teacherConfig;
-            const nextStudent = studentInput ? patchAgent(studentConfig, studentInput) : studentConfig;
-            const nextSession = sessionInput ? patchSession(examConfig, sessionInput) : examConfig;
+            const nextTeacher = teacherInput ? patchAgent(current.teacherConfig, teacherInput) : current.teacherConfig;
+            const nextStudent = studentInput ? patchAgent(current.studentConfig, studentInput) : current.studentConfig;
+            const nextSession = sessionInput ? patchSession(current.examConfig, sessionInput) : current.examConfig;
 
             const teacherPrompt = hasOwn(input, 'teacherSystemPrompt')
               ? requireString(input, 'teacherSystemPrompt')
@@ -426,24 +492,24 @@ export function ExaminationConfigurationTools({
               throw new Error('studentSystemPrompt cannot be empty when supplied.');
             }
 
-            setTeacherConfig(teacherPrompt === undefined
+            current.setTeacherConfig(teacherPrompt === undefined
               ? nextTeacher
               : { ...nextTeacher, systemPrompt: teacherPrompt });
-            setStudentConfig(studentPrompt === undefined
+            current.setStudentConfig(studentPrompt === undefined
               ? nextStudent
               : { ...nextStudent, systemPrompt: studentPrompt });
-            setExamConfig(nextSession);
-            if (teacherPrompt !== undefined) setPromptModeTeacher('custom');
-            if (studentPrompt !== undefined) setPromptModeStudent('custom');
-            onContinueToReview();
+            current.setExamConfig(nextSession);
+            if (teacherPrompt !== undefined) current.setPromptModeTeacher('custom');
+            if (studentPrompt !== undefined) current.setPromptModeStudent('custom');
+            current.onContinueToReview();
 
             return result(JSON.stringify({
               message: 'Entire Examination configuration saved in one command. Opening system-prompt review.',
               teacher: publicAgentConfiguration(nextTeacher),
               student: publicAgentConfiguration(nextStudent),
               session: nextSession,
-              teacherPromptMode: teacherPrompt === undefined ? promptModeTeacher : 'custom',
-              studentPromptMode: studentPrompt === undefined ? promptModeStudent : 'custom',
+              teacherPromptMode: teacherPrompt === undefined ? current.promptModeTeacher : 'custom',
+              studentPromptMode: studentPrompt === undefined ? current.promptModeStudent : 'custom',
             }, null, 2));
           },
         });
@@ -460,9 +526,10 @@ export function ExaminationConfigurationTools({
           ].join('\n'),
           inputSchema: sessionInputSchema,
           execute: (input: Record<string, unknown>) => {
-            const next = patchSession(examConfig, input);
-            setExamConfig(next);
-            onContinueToReview();
+            const current = latestRef.current;
+            const next = patchSession(current.examConfig, input);
+            current.setExamConfig(next);
+            current.onContinueToReview();
             return result(`Examination parameters saved. Current session:\n${JSON.stringify(next, null, 2)}`);
           },
         });
@@ -471,25 +538,28 @@ export function ExaminationConfigurationTools({
 
       if (step === 'review') {
         register({
+          name: 'lobasters_get_examination_configuration',
+          description: 'Read the live Examination configuration, including both editable system prompts. API keys remain write-only.',
+          inputSchema: noInputSchema,
+          execute: () => result(examinationConfigurationSnapshot(latestRef.current)),
+        });
+        register({
           name: 'lobasters_finalize_examination_system_prompts',
-          description: [
-            'Optionally replace either complete Examination system prompt. Omit a prompt to keep it exactly as written.',
-            `Current Teacher prompt (${promptModeTeacher} mode):\n${teacherConfig.systemPrompt}`,
-            `Current Student prompt (${promptModeStudent} mode):\n${studentConfig.systemPrompt}`,
-          ].join('\n\n'),
+          description: 'Optionally replace either complete Examination system prompt. Omit a prompt to keep it unchanged. Use lobasters_get_examination_configuration to inspect the live prompts first.',
           inputSchema: promptInputSchema,
           execute: (input: Record<string, unknown>) => {
+            const current = latestRef.current;
             if (hasOwn(input, 'teacherSystemPrompt')) {
               const prompt = requireString(input, 'teacherSystemPrompt');
               if (!prompt.trim()) throw new Error('teacherSystemPrompt cannot be empty when supplied.');
-              setPromptModeTeacher('custom');
-              setTeacherConfig({ ...teacherConfig, systemPrompt: prompt });
+              current.setPromptModeTeacher('custom');
+              current.setTeacherConfig({ ...current.teacherConfig, systemPrompt: prompt });
             }
             if (hasOwn(input, 'studentSystemPrompt')) {
               const prompt = requireString(input, 'studentSystemPrompt');
               if (!prompt.trim()) throw new Error('studentSystemPrompt cannot be empty when supplied.');
-              setPromptModeStudent('custom');
-              setStudentConfig({ ...studentConfig, systemPrompt: prompt });
+              current.setPromptModeStudent('custom');
+              current.setStudentConfig({ ...current.studentConfig, systemPrompt: prompt });
             }
             return result('Examination system prompts finalized. Omitted prompts were kept unchanged.');
           },
@@ -499,7 +569,7 @@ export function ExaminationConfigurationTools({
           description: 'Start the configured Examination. This begins live provider requests with the researcher-configured models and may consume provider credits.',
           inputSchema: noInputSchema,
           execute: async () => {
-            await onStart();
+            await latestRef.current.onStart();
             return result('Examination is starting. Live status will be available while the models work.');
           },
         });
@@ -512,9 +582,7 @@ export function ExaminationConfigurationTools({
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [
-    step, teacherConfig, setTeacherConfig, studentConfig, setStudentConfig, examConfig, setExamConfig,
-    promptModeTeacher, setPromptModeTeacher, promptModeStudent, setPromptModeStudent, state,
-    onContinueToReview, onStart, onReset, onDownloadReport,
+    registrationPhase,
   ]);
 
   return null;
