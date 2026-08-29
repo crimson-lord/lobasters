@@ -12,7 +12,6 @@ import type {
 
 type ExamStep = 'models' | 'exam-params' | 'review' | 'running' | 'report';
 type PromptMode = 'template' | 'custom';
-type ExamAgent = 'Teacher' | 'Student';
 type ReportFormat = 'pdf' | 'markdown';
 
 interface ExaminationConfigurationToolsProps {
@@ -28,7 +27,6 @@ interface ExaminationConfigurationToolsProps {
   promptModeStudent: PromptMode;
   setPromptModeStudent: Dispatch<SetStateAction<PromptMode>>;
   state: ProvingGroundState;
-  onContinueFromModels: () => void;
   onContinueToReview: () => void;
   onStart: () => Promise<void>;
   onReset: () => void;
@@ -92,6 +90,33 @@ const sessionInputSchema = {
   },
 };
 
+const completeExaminationInputSchema = {
+  type: 'object' as const,
+  additionalProperties: false,
+  properties: {
+    teacher: {
+      ...agentInputSchema,
+      description: 'Complete or partial Teacher configuration. Omit individual properties to preserve them.',
+    },
+    student: {
+      ...agentInputSchema,
+      description: 'Complete or partial Student configuration. Omit individual properties to preserve them.',
+    },
+    session: {
+      ...sessionInputSchema,
+      description: 'Examination grading scale, question count, and domains. Omit individual properties to preserve them.',
+    },
+    teacherSystemPrompt: {
+      type: 'string',
+      description: 'Optional complete replacement for the Teacher system prompt. Supplying it switches the Teacher to custom-prompt mode.',
+    },
+    studentSystemPrompt: {
+      type: 'string',
+      description: 'Optional complete replacement for the Student system prompt. Supplying it switches the Student to custom-prompt mode.',
+    },
+  },
+};
+
 const promptInputSchema = {
   type: 'object' as const,
   additionalProperties: false,
@@ -133,6 +158,15 @@ function requireNumber(input: Record<string, unknown>, key: string) {
     throw new Error(`${key} must be a finite number.`);
   }
   return value;
+}
+
+function optionalObject(input: Record<string, unknown>, key: string) {
+  if (!hasOwn(input, key)) return undefined;
+  const value = input[key];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${key} must be an object.`);
+  }
+  return value as Record<string, unknown>;
 }
 
 function publicAgentConfiguration(config: ProvingGroundAgentConfig) {
@@ -199,13 +233,52 @@ function patchAgent(current: ProvingGroundAgentConfig, input: Record<string, unk
   return next;
 }
 
-function agentDescription(agent: ExamAgent, config: ProvingGroundAgentConfig) {
+function patchSession(
+  current: Omit<ProvingGroundConfig, 'teacher' | 'student'>,
+  input: Record<string, unknown>,
+) {
+  const next = { ...current };
+  if (hasOwn(input, 'gradingScale')) {
+    const gradingScale = requireString(input, 'gradingScale') as GradingScale;
+    if (!gradingScales.includes(gradingScale)) throw new Error('gradingScale is not supported.');
+    next.gradingScale = gradingScale;
+  }
+  if (hasOwn(input, 'questionCount')) {
+    const questionCount = requireNumber(input, 'questionCount');
+    if (!Number.isInteger(questionCount) || questionCount < 1 || questionCount > 50) {
+      throw new Error('questionCount must be an integer from 1 through 50.');
+    }
+    next.questionCount = questionCount;
+  }
+  if (hasOwn(input, 'domains')) {
+    if (!Array.isArray(input.domains) || input.domains.some((domain: unknown) => typeof domain !== 'string')) {
+      throw new Error('domains must be an array of strings.');
+    }
+    next.domains = input.domains.map((domain: string) => domain.trim()).filter(Boolean);
+  }
+  return next;
+}
+
+function completeExaminationDescription(
+  teacher: ProvingGroundAgentConfig,
+  student: ProvingGroundAgentConfig,
+  session: Omit<ProvingGroundConfig, 'teacher' | 'student'>,
+  teacherPromptMode: PromptMode,
+  studentPromptMode: PromptMode,
+) {
   return [
-    `Configure the Examination ${agent} in one survey-level call.`,
-    'Every property is optional; omitted values remain unchanged. The API key can be written but is never disclosed.',
-    'Current live configuration:',
-    JSON.stringify(publicAgentConfiguration(config), null, 2),
-  ].join('\n');
+    'Configure the entire Examination in ONE WebMCP command. This is the primary agent-oriented setup tool.',
+    'It can set both models, the grading scale, question count, domains, and either complete system prompt. Omit a property to preserve its current value.',
+    'API keys are write-only: they can be supplied but are never exposed in discovery or results.',
+    'Current Teacher configuration:',
+    JSON.stringify(publicAgentConfiguration(teacher), null, 2),
+    'Current Student configuration:',
+    JSON.stringify(publicAgentConfiguration(student), null, 2),
+    'Current session configuration:',
+    JSON.stringify(session, null, 2),
+    `Current Teacher prompt (${teacherPromptMode} mode):\n${teacher.systemPrompt}`,
+    `Current Student prompt (${studentPromptMode} mode):\n${student.systemPrompt}`,
+  ].join('\n\n');
 }
 
 function sanitizedTranscript(transcript: NonNullable<ProvingGroundState['transcript']>) {
@@ -229,7 +302,6 @@ export function ExaminationConfigurationTools({
   promptModeStudent,
   setPromptModeStudent,
   state,
-  onContinueFromModels,
   onContinueToReview,
   onStart,
   onReset,
@@ -308,29 +380,56 @@ export function ExaminationConfigurationTools({
       }
 
       if (step === 'models') {
-        const registerAgent = (
-          agent: ExamAgent,
-          config: ProvingGroundAgentConfig,
-          setConfig: Dispatch<SetStateAction<ProvingGroundAgentConfig>>,
-        ) => register({
-          name: `lobasters_configure_examination_${agent.toLowerCase()}`,
-          description: agentDescription(agent, config),
-          inputSchema: agentInputSchema,
-          execute: (input: Record<string, unknown>) => {
-            const next = patchAgent(config, input);
-            setConfig(next);
-            return result(`Examination ${agent} updated. Current configuration:\n${JSON.stringify(publicAgentConfiguration(next), null, 2)}`);
-          },
-        });
-        registerAgent('Teacher', teacherConfig, setTeacherConfig);
-        registerAgent('Student', studentConfig, setStudentConfig);
         register({
-          name: 'lobasters_continue_examination_setup',
-          description: 'Continue after configuring Teacher and Student to the grading scale, number of questions, and domains survey.',
-          inputSchema: noInputSchema,
-          execute: () => {
-            onContinueFromModels();
-            return result('Opening the Examination parameters survey.');
+          name: 'lobasters_configure_examination',
+          description: completeExaminationDescription(
+            teacherConfig,
+            studentConfig,
+            examConfig,
+            promptModeTeacher,
+            promptModeStudent,
+          ),
+          inputSchema: completeExaminationInputSchema,
+          execute: (input: Record<string, unknown>) => {
+            const teacherInput = optionalObject(input, 'teacher');
+            const studentInput = optionalObject(input, 'student');
+            const sessionInput = optionalObject(input, 'session');
+            const nextTeacher = teacherInput ? patchAgent(teacherConfig, teacherInput) : teacherConfig;
+            const nextStudent = studentInput ? patchAgent(studentConfig, studentInput) : studentConfig;
+            const nextSession = sessionInput ? patchSession(examConfig, sessionInput) : examConfig;
+
+            const teacherPrompt = hasOwn(input, 'teacherSystemPrompt')
+              ? requireString(input, 'teacherSystemPrompt')
+              : undefined;
+            const studentPrompt = hasOwn(input, 'studentSystemPrompt')
+              ? requireString(input, 'studentSystemPrompt')
+              : undefined;
+            if (teacherPrompt !== undefined && !teacherPrompt.trim()) {
+              throw new Error('teacherSystemPrompt cannot be empty when supplied.');
+            }
+            if (studentPrompt !== undefined && !studentPrompt.trim()) {
+              throw new Error('studentSystemPrompt cannot be empty when supplied.');
+            }
+
+            setTeacherConfig(teacherPrompt === undefined
+              ? nextTeacher
+              : { ...nextTeacher, systemPrompt: teacherPrompt });
+            setStudentConfig(studentPrompt === undefined
+              ? nextStudent
+              : { ...nextStudent, systemPrompt: studentPrompt });
+            setExamConfig(nextSession);
+            if (teacherPrompt !== undefined) setPromptModeTeacher('custom');
+            if (studentPrompt !== undefined) setPromptModeStudent('custom');
+            onContinueToReview();
+
+            return result(JSON.stringify({
+              message: 'Entire Examination configuration saved in one command. Opening system-prompt review.',
+              teacher: publicAgentConfiguration(nextTeacher),
+              student: publicAgentConfiguration(nextStudent),
+              session: nextSession,
+              teacherPromptMode: teacherPrompt === undefined ? promptModeTeacher : 'custom',
+              studentPromptMode: studentPrompt === undefined ? promptModeStudent : 'custom',
+            }, null, 2));
           },
         });
         return;
@@ -345,26 +444,8 @@ export function ExaminationConfigurationTools({
             JSON.stringify(examConfig, null, 2),
           ].join('\n'),
           inputSchema: sessionInputSchema,
-            execute: (input: Record<string, unknown>) => {
-            const next = { ...examConfig };
-            if (hasOwn(input, 'gradingScale')) {
-              const gradingScale = requireString(input, 'gradingScale') as GradingScale;
-              if (!gradingScales.includes(gradingScale)) throw new Error('gradingScale is not supported.');
-              next.gradingScale = gradingScale;
-            }
-            if (hasOwn(input, 'questionCount')) {
-              const questionCount = requireNumber(input, 'questionCount');
-              if (!Number.isInteger(questionCount) || questionCount < 1 || questionCount > 50) {
-                throw new Error('questionCount must be an integer from 1 through 50.');
-              }
-              next.questionCount = questionCount;
-            }
-            if (hasOwn(input, 'domains')) {
-              if (!Array.isArray(input.domains) || input.domains.some((domain: unknown) => typeof domain !== 'string')) {
-                throw new Error('domains must be an array of strings.');
-              }
-              next.domains = input.domains.map((domain: string) => domain.trim()).filter(Boolean);
-            }
+          execute: (input: Record<string, unknown>) => {
+            const next = patchSession(examConfig, input);
             setExamConfig(next);
             onContinueToReview();
             return result(`Examination parameters saved. Current session:\n${JSON.stringify(next, null, 2)}`);
@@ -418,7 +499,7 @@ export function ExaminationConfigurationTools({
   }, [
     step, teacherConfig, setTeacherConfig, studentConfig, setStudentConfig, examConfig, setExamConfig,
     promptModeTeacher, setPromptModeTeacher, promptModeStudent, setPromptModeStudent, state,
-    onContinueFromModels, onContinueToReview, onStart, onReset, onDownloadReport,
+    onContinueToReview, onStart, onReset, onDownloadReport,
   ]);
 
   return null;

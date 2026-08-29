@@ -234,7 +234,6 @@ export default function ProvingGroundPage() {
           promptModeStudent={promptModeStudent}
           setPromptModeStudent={setPromptModeStudent}
           state={state}
-          onContinueFromModels={() => setStep('exam-params')}
           onContinueToReview={() => setStep('review')}
           onStart={handleStartExam}
           onReset={handleReset}
