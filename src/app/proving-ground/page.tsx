@@ -890,7 +890,32 @@ interface ReportViewProps {
   onReset: () => void;
 }
 
+const requestReportDownload = (transcript: ProvingGroundTranscript, format: 'pdf' | 'markdown') => {
+    // A synthetic <a>.click() is blocked when a WebMCP action invokes it.
+    // A normal form navigation to an attachment response works for both the
+    // researcher UI and agent-originated WebMCP requests.
+    const safeTranscript = JSON.parse(JSON.stringify(transcript)) as ProvingGroundTranscript;
+    delete safeTranscript.config.teacher.apiKey;
+    delete safeTranscript.config.student.apiKey;
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = '/api/examination-report';
+    form.style.display = 'none';
+    for (const [name, value] of Object.entries({ format, transcript: JSON.stringify(safeTranscript) })) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    }
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+};
+
 const generatePdf = (transcript: ProvingGroundTranscript) => {
+    requestReportDownload(transcript, 'pdf');
+    return;
     const doc = new jsPDF();
     const pageHeight = doc.internal.pageSize.height;
     const margin = 15;
@@ -1013,6 +1038,8 @@ const generatePdf = (transcript: ProvingGroundTranscript) => {
 };
 
 const generateMarkdown = (transcript: ProvingGroundTranscript) => {
+    requestReportDownload(transcript, 'markdown');
+    return;
     let mdContent = `# Examination: Final Report\n\n`;
 
     const teacherNickname = transcript.config.teacher.nickname || 'Teacher';
