@@ -11,6 +11,10 @@ export interface StreamFailure {
   retryable?: boolean;
 }
 
+export interface StreamCompletionOptions {
+  signal?: AbortSignal;
+}
+
 export class StreamCompletionError extends Error {
   constructor(
     message: string,
@@ -26,11 +30,13 @@ export async function collectChatCompletion(
   connection: StreamConnection,
   request: Record<string, unknown>,
   onDelta?: (delta: Record<string, unknown>) => void,
+  options: StreamCompletionOptions = {},
 ): Promise<{ rawRequest: Record<string, unknown>; rawResponse: Record<string, any> }> {
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ connection, request }),
+    signal: options.signal,
   });
 
   if (!response.ok || !response.body) {

@@ -38,6 +38,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import Link from 'next/link';
 import { PageNavigationTools } from '@/components/webmcp/page-navigation-tools';
+import { LabSetupTools } from '@/components/webmcp/lab-setup-tools';
 
 
 export const dynamic = 'force-dynamic';
@@ -117,17 +118,21 @@ export default function LM0Page() {
     turnPromptTemplate,
   };
 
-  const handleStartSession = async () => {
+  const startSessionWithConfiguration = async (sourceConfig: LM0Config, sourcePromptMode: PromptMode) => {
     setIsStarting(true);
     setStartError(null);
 
-    let finalConfig: LM0Config = {
-      ...fullConfig,
+    const coherentConfig: LM0Config = {
+      ...sourceConfig,
+      useCustomPrompts: sourcePromptMode === 'custom',
+    };
+    const finalConfig: LM0Config = {
+      ...coherentConfig,
       masterAgent: {
-        ...masterAgentConfig,
-        systemPrompt: promptMode === 'template'
-          ? constructSystemPrompt(fullConfig)
-          : masterAgentConfig.systemPrompt,
+        ...coherentConfig.masterAgent,
+        systemPrompt: sourcePromptMode === 'template'
+          ? constructSystemPrompt(coherentConfig)
+          : coherentConfig.masterAgent.systemPrompt,
       }
     };
     
@@ -135,11 +140,41 @@ export default function LM0Page() {
         sessionStorage.setItem('lm0_config', JSON.stringify(finalConfig));
         router.push('/lm0/session');
 
-    } catch (e: any) {
-        setStartError(`Failed to start session. ${e.message}`);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStartError(`Failed to start session. ${message}`);
+        throw error;
     } finally {
         setIsStarting(false);
     }
+  };
+
+  const handleStartSession = async () => {
+    try {
+      await startSessionWithConfiguration(fullConfig, promptMode);
+    } catch {
+      // The researcher-facing review displays startError inline.
+    }
+  };
+
+  const setCoherentPromptMode = (mode: PromptMode) => {
+    setPromptMode(mode);
+    setUseCustomPrompts(mode === 'custom');
+  };
+
+  const applyWebMcpConfiguration = (config: LM0Config, mode: PromptMode) => {
+    setMasterAgentConfig(config.masterAgent);
+    setLlmConnections(config.llmConnections);
+    setChallengeCount(config.challengeCount);
+    setQuestionSource(config.questionSource);
+    setQuestionBankContent(config.questionBankContent);
+    setManualContent(config.manualContent);
+    setAllowHelperAgents(config.allowHelperAgents);
+    setAllowedFiles(config.allowedFiles);
+    setSystemPromptTemplate(config.systemPromptTemplate);
+    setTurnPromptTemplate(config.turnPromptTemplate);
+    setCoherentPromptMode(mode);
+    setStartError(null);
   };
 
   const renderConfigSteps = () => {
@@ -182,7 +217,7 @@ export default function LM0Page() {
             masterAgentConfig={masterAgentConfig}
             setMasterAgentConfig={setMasterAgentConfig}
             promptMode={promptMode}
-            setPromptMode={setPromptMode}
+            setPromptMode={setCoherentPromptMode}
             onBack={() => setStep(questionSource === 'agent' ? 'challenges' : 'environment')}
             onStart={handleStartSession}
             isStarting={isStarting}
@@ -210,6 +245,14 @@ export default function LM0Page() {
   return (
     <div className="h-screen max-h-screen w-full flex flex-col text-foreground overflow-hidden">
        <PageNavigationTools page="lab" />
+       <LabSetupTools
+         step={step}
+         config={fullConfig}
+         promptMode={promptMode}
+         applyConfiguration={applyWebMcpConfiguration}
+         openReview={() => setStep('review')}
+         startSession={startSessionWithConfiguration}
+       />
        <ScrollArea className="h-full w-full">
             <div className="p-4 md:p-8">
                 {renderConfigSteps()}
@@ -728,7 +771,7 @@ interface ReviewStepProps {
   masterAgentConfig: LM0Config['masterAgent'];
   setMasterAgentConfig: React.Dispatch<React.SetStateAction<LM0Config['masterAgent']>>;
   promptMode: PromptMode;
-  setPromptMode: React.Dispatch<React.SetStateAction<PromptMode>>;
+  setPromptMode: (mode: PromptMode) => void;
   onBack: () => void;
   onStart: () => Promise<void>;
   isStarting: boolean;

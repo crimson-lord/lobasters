@@ -34,6 +34,14 @@ export async function POST(request: Request) {
     return Response.json({ error: { message: 'Model, provider URL, and API key are required.' } }, { status: 400 });
   }
 
+  const providerAbortController = new AbortController();
+  const abortProvider = () => providerAbortController.abort(request.signal.reason);
+  if (request.signal.aborted) {
+    abortProvider();
+  } else {
+    request.signal.addEventListener('abort', abortProvider, { once: true });
+  }
+
   const stream = new ReadableStream({
     async start(controller) {
       try {
@@ -48,7 +56,9 @@ export async function POST(request: Request) {
         const providerStream = await openai.chat.completions.create({
           ...completionRequest,
           stream: true,
-        } as OpenAI.Chat.ChatCompletionCreateParamsStreaming);
+        } as OpenAI.Chat.ChatCompletionCreateParamsStreaming, {
+          signal: providerAbortController.signal,
+        });
 
         const message: Record<string, any> = { role: 'assistant', content: '' };
         for await (const chunk of providerStream) {
@@ -91,10 +101,20 @@ export async function POST(request: Request) {
 
         controller.enqueue(event('done', { message }));
       } catch (error) {
-        controller.enqueue(event('error', toProviderFailure(error)));
+        if (!providerAbortController.signal.aborted) {
+          controller.enqueue(event('error', toProviderFailure(error)));
+        }
       } finally {
-        controller.close();
+        request.signal.removeEventListener('abort', abortProvider);
+        try {
+          controller.close();
+        } catch {
+          // A canceled response stream is already closed by the runtime.
+        }
       }
+    },
+    cancel() {
+      providerAbortController.abort('Client stopped reading the provider stream.');
     },
   });
 

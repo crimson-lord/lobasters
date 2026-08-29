@@ -7,9 +7,10 @@ import {
 } from '../types';
 import OpenAI from 'openai';
 import { collectChatCompletion } from '@/lib/chat-stream';
+import { getRuntimeAllowedFiles } from '../utils';
 
 const createFileIdEnum = (config: LM0Config) => {
-    const allowedFiles = config.allowedFiles;
+    const allowedFiles = getRuntimeAllowedFiles(config);
     
     if (allowedFiles.length === 0) {
         // Zod enum must have at least one value, this is a fallback.
@@ -19,7 +20,11 @@ const createFileIdEnum = (config: LM0Config) => {
     return z.enum(allowedFiles as [string, ...string[]]);
 };
 
-export async function runMasterAgentTurn(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[], config: LM0Config): Promise<OpenAI.Chat.ChatCompletionMessage> {
+export async function runMasterAgentTurn(
+  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+  config: LM0Config,
+  signal?: AbortSignal,
+): Promise<OpenAI.Chat.ChatCompletionMessage> {
   const masterConfig = config.masterAgent;
 
   const apiKey = masterConfig.apiKey || process.env.OPENAI_API_KEY;
@@ -43,7 +48,7 @@ export async function runMasterAgentTurn(messages: OpenAI.Chat.Completions.ChatC
     fileId: AllowedFileIdEnum.describe("The ID of the file to read."),
   });
 
-  const writableFiles = config.allowedFiles.filter(f => f !== 'manual.md' && f !== 'question-bank.md');
+  const writableFiles = getRuntimeAllowedFiles(config).filter(f => f !== 'manual.md' && f !== 'question-bank.md');
 
   const writeFileSchema = z.object({
     fileId: writableFiles.length > 0 ? z.enum(writableFiles as [string, ...string[]]) : z.enum([' ']),
@@ -110,6 +115,8 @@ export async function runMasterAgentTurn(messages: OpenAI.Chat.Completions.ChatC
   const { rawResponse } = await collectChatCompletion(
     { baseURL: masterConfig.baseURL, apiKey },
     requestPayload as unknown as Record<string, unknown>,
+    undefined,
+    { signal },
   );
 
   if (!rawResponse) {
@@ -127,9 +134,10 @@ interface LLMToolOutput {
 interface LLMToolInput {
     config: LLMConnectionConfig;
     prompt: string;
+    signal?: AbortSignal;
 }
 
-export async function runLLMTool({ config, prompt }: LLMToolInput): Promise<LLMToolOutput> {
+export async function runLLMTool({ config, prompt, signal }: LLMToolInput): Promise<LLMToolOutput> {
     const apiKey = config.apiKey || process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
@@ -152,6 +160,8 @@ export async function runLLMTool({ config, prompt }: LLMToolInput): Promise<LLMT
     const { rawRequest, rawResponse } = await collectChatCompletion(
         { baseURL: config.baseURL, apiKey },
         requestPayload as unknown as Record<string, unknown>,
+        undefined,
+        { signal },
     );
 
     const content = rawResponse.content;

@@ -10,7 +10,7 @@ import {
   HubMessage,
   HistoryEntry,
 } from '../types';
-import { Bot, FileText, CheckSquare, ListTodo, Play, Pause, Square, AlertCircle, RefreshCw, HelpCircle, Code, BookCopy, BookOpen, MessageSquare, ShieldAlert, Copy, Check } from 'lucide-react';
+import { Bot, FileText, CheckSquare, ListTodo, Play, Pause, Square, AlertCircle, RefreshCw, HelpCircle, Code, BookCopy, BookOpen, MessageSquare, ShieldAlert, Copy, Check, Download } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useLM0Engine } from '../engine';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -28,13 +28,30 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { useRouter } from 'next/navigation';
+import { LabSessionTools, requestLabReportDownload, type LabReportFormat } from '@/components/webmcp/lab-session-tools';
 
 export const dynamic = 'force-dynamic';
 
 export default function LM0SessionPage() {
-  const { state, dispatch } = useLM0Engine();
+  const {
+    state,
+    dispatch,
+    pauseSession,
+    resumeSession,
+    finishSession,
+    resetSession,
+    captureCheckpoint,
+    restoreCheckpoint,
+    queueResearcherInstruction,
+  } = useLM0Engine();
   const [isInitialized, setIsInitialized] = useState(false);
   const router = useRouter();
+
+  const runAnother = () => {
+    sessionStorage.removeItem('lm0_config');
+    resetSession();
+    router.push('/lm0');
+  };
 
   useEffect(() => {
     const configStr = sessionStorage.getItem('lm0_config');
@@ -66,17 +83,27 @@ export default function LM0SessionPage() {
       return (
         <ScrollArea className="h-full w-full">
             <div className="p-4 md:p-8">
-                 <FinalReportView state={state} onReset={() => router.push('/lm0')} />
+                 <FinalReportView state={state} onReset={runAnother} onExport={format => requestLabReportDownload(state, format)} />
             </div>
         </ScrollArea>
       );
     } else {
-      return <SessionView state={state} dispatch={dispatch} />;
+      return <SessionView state={state} onPause={pauseSession} onResume={resumeSession} onStop={finishSession} />;
     }
   };
 
   return (
     <div className="h-screen max-h-screen w-full flex flex-col text-foreground overflow-hidden">
+      <LabSessionTools
+        state={state}
+        pauseSession={pauseSession}
+        resumeSession={resumeSession}
+        finishSession={finishSession}
+        captureCheckpoint={captureCheckpoint}
+        restoreCheckpoint={restoreCheckpoint}
+        queueResearcherInstruction={queueResearcherInstruction}
+        onRunAnother={runAnother}
+      />
       {renderContent()}
     </div>
   );
@@ -89,14 +116,16 @@ export default function LM0SessionPage() {
 
 interface SessionViewProps {
   state: LM0State;
-  dispatch: React.Dispatch<any>;
+  onPause: () => void;
+  onResume: () => void;
+  onStop: () => void;
 }
 
-function SessionView({ state, dispatch }: SessionViewProps) {
+function SessionView({ state, onPause, onResume, onStop }: SessionViewProps) {
   return (
     <div className="flex flex-1 flex-col animate-fade-in-up p-4 md:p-8 gap-4 overflow-hidden">
       <header className="flex-shrink-0">
-        <SessionHeader state={state} dispatch={dispatch} />
+        <SessionHeader state={state} onPause={onPause} onResume={onResume} onStop={onStop} />
       </header>
       <main className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-4 gap-4">
         <div className="lg:col-span-1 h-full min-h-0">
@@ -116,7 +145,17 @@ function SessionView({ state, dispatch }: SessionViewProps) {
   );
 }
 
-function SessionHeader({ state, dispatch }: { state: LM0State; dispatch: React.Dispatch<any>}) {
+function SessionHeader({
+  state,
+  onPause,
+  onResume,
+  onStop,
+}: {
+  state: LM0State;
+  onPause: () => void;
+  onResume: () => void;
+  onStop: () => void;
+}) {
   const { status, challenges, config } = state;
   const completed = challenges.filter(c => c.isCompleted).length;
   const total = challenges.length;
@@ -161,18 +200,16 @@ function SessionHeader({ state, dispatch }: { state: LM0State; dispatch: React.D
         </div>
         <div className="flex items-center gap-2">
           {status === 'running' && (
-            <Button variant="outline" size="sm" onClick={() => dispatch({ type: 'PAUSE_SESSION' })}>
+            <Button variant="outline" size="sm" onClick={onPause}>
               <Pause className="h-4 w-4 mr-2" /> Pause
             </Button>
           )}
            {status === 'paused' && (
-            <Button variant="outline" size="sm" onClick={() => dispatch({ type: 'RESUME_SESSION' })}>
+            <Button variant="outline" size="sm" onClick={onResume}>
               <Play className="h-4 w-4 mr-2" /> Resume
             </Button>
           )}
-          <Button variant="destructive" size="sm" onClick={() => {
-              dispatch({ type: 'FINISH_SESSION' });
-          }}>
+          <Button variant="destructive" size="sm" onClick={onStop}>
             <Square className="h-4 w-4 mr-2" /> Stop Session
           </Button>
         </div>
@@ -419,9 +456,10 @@ function RawTranscriptDialog({ history }: { history: LM0State['history'] }) {
 interface FinalReportViewProps {
   state: LM0State;
   onReset: () => void;
+  onExport: (format: LabReportFormat) => void;
 }
 
-function FinalReportView({ state, onReset }: FinalReportViewProps) {
+function FinalReportView({ state, onReset, onExport }: FinalReportViewProps) {
   const { status, error, challenges, virtualFiles, history } = state;
 
   return (
@@ -434,8 +472,13 @@ function FinalReportView({ state, onReset }: FinalReportViewProps) {
               {status === 'error' ? `Session stopped with an error.` : 'The agent has completed its session.'}
             </CardDescription>
           </div>
-           <div className="flex items-center gap-2">
+           <div className="flex flex-wrap items-center justify-end gap-2">
             <RawTranscriptDialog history={history} />
+            {(['markdown', 'pdf', 'json', 'zip'] as const).map(format => (
+              <Button key={format} onClick={() => onExport(format)} variant="outline" size="sm">
+                <Download className="mr-2 h-4 w-4" /> {format === 'markdown' ? 'MD' : format.toUpperCase()}
+              </Button>
+            ))}
             <Button onClick={onReset} variant="outline">
               <RefreshCw className="mr-2 h-4 w-4" /> Start New Session
             </Button>

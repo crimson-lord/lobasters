@@ -1,6 +1,18 @@
 
 import { LM0Config, LM0State } from './types';
 
+/** question-bank.md is a LAB runtime file, even when it is not user-selectable. */
+export function getRuntimeAllowedFiles(config: LM0Config): string[] {
+    return Array.from(new Set([...config.allowedFiles, 'question-bank.md']));
+}
+
+export function normalizeLM0Config(config: LM0Config): LM0Config {
+    return {
+        ...config,
+        allowedFiles: getRuntimeAllowedFiles(config),
+    };
+}
+
 export const TURN_PROMPT_TEMPLATE = `
 <CONTEXT>
 Current turn number is: {{TURN_NUMBER}}
@@ -114,13 +126,28 @@ export function constructTurnPrompt(state: LM0State): string {
 
     const latestMessageToMe = state.messagesToMe[state.messagesToMe.length - 1] || 'No message yet. This is your first turn.';
     
-    return template
+    let renderedPrompt = template
         .replace('{{TURN_NUMBER}}', String(state.turnNumber))
         .replace('{{CHALLENGE_STATS}}', getChallengeStats(state))
         .replace('{{FILE_STATS}}', getFileStats(state))
         .replace('{{TIME_STATS}}', getTimeStats(state))
         .replace('{{LATEST_MESSAGE}}', latestMessageToMe)
         .replace('{{PREVIOUS_MESSAGES}}', getPreviousMessages(state));
+
+    const researcherInstruction = state.queuedResearcherInstruction?.trim();
+    const instructionBlock = researcherInstruction
+        ? `<RESEARCHER_INSTRUCTION>\n${researcherInstruction}\n</RESEARCHER_INSTRUCTION>`
+        : '';
+
+    if (renderedPrompt.includes('{{RESEARCHER_INSTRUCTION}}')) {
+        return renderedPrompt.replace('{{RESEARCHER_INSTRUCTION}}', instructionBlock);
+    }
+
+    if (instructionBlock) {
+        renderedPrompt = `${renderedPrompt}\n\n${instructionBlock}\nThis instruction applies to this turn only.`;
+    }
+
+    return renderedPrompt;
 }
 
 
@@ -133,7 +160,7 @@ function getAvailableToolsPrompt(config: LM0Config): string {
         '- `FINISH_SESSION()`: Call this when all work is complete to end the session.'
     ];
 
-    const writableFiles = config.allowedFiles.filter(f => f !== 'manual.md' && f !== 'question-bank.md');
+    const writableFiles = getRuntimeAllowedFiles(config).filter(f => f !== 'manual.md' && f !== 'question-bank.md');
 
     if (writableFiles.length > 0) {
         tools.push('- `write_file(fileId, content)`: Writes/overwrites content to an allowed file.');
@@ -155,11 +182,13 @@ function getAvailableToolsPrompt(config: LM0Config): string {
 function getAvailableFilesPrompt(config: LM0Config): string {
     const files: string[] = [];
     
-    config.allowedFiles.forEach(fileId => {
+    getRuntimeAllowedFiles(config).forEach(fileId => {
         if (fileId === 'manual.md') {
             files.push('- `manual.md` (read-only): Your instruction manual.');
-        } else if (fileId === 'question-bank.md' && config.questionSource === 'user') {
-            files.push('- `question-bank.md` (read-only): Contains the user-provided challenges.');
+        } else if (fileId === 'question-bank.md') {
+            files.push(config.questionSource === 'user'
+                ? '- `question-bank.md` (read-only): Contains the user-provided challenges.'
+                : '- `question-bank.md` (managed through upload_question): Contains the generated challenges.');
         } else {
             files.push(`- \`${fileId}\`: General purpose file.`);
         }
@@ -176,8 +205,10 @@ export function constructSystemPrompt(config: LM0Config): string {
     const availableTools = getAvailableToolsPrompt(config);
     const availableFiles = getAvailableFilesPrompt(config);
 
-    const template = config.useCustomPrompts 
-        ? config.systemPromptTemplate || MASTER_AGENT_SYSTEM_PROMPT_TEMPLATE
+    const customPrompt = config.masterAgent.systemPrompt?.trim()
+        || config.systemPromptTemplate?.trim();
+    const template = config.useCustomPrompts && customPrompt
+        ? customPrompt
         : MASTER_AGENT_SYSTEM_PROMPT_TEMPLATE;
 
     return template

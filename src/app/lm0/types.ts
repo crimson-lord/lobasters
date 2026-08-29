@@ -87,6 +87,28 @@ export interface Challenge {
 }
 
 /**
+ * A complete, serializable snapshot of the mutable LAB runtime at the start of
+ * a turn. Configuration is intentionally kept outside the checkpoint because
+ * it is immutable for the lifetime of a session.
+ */
+export interface LM0Checkpoint {
+    turnNumber: number;
+    virtualFiles: Record<VirtualFileId, VirtualFile>;
+    challenges: Challenge[];
+    hubMessages: HubMessage[];
+    history: HistoryEntry[];
+    log: string[];
+    errors: string[];
+    errorCount: number;
+    error?: string;
+    sessionStartTime: number | null;
+    lastHelperAgentUseTime: number | null;
+    lastManualReadTime: number | null;
+    messagesToMe: string[];
+    queuedResearcherInstruction: string | null;
+}
+
+/**
  * Represents the entire state of the LM0 engine.
  */
 export interface LM0State {
@@ -111,6 +133,9 @@ export interface LM0State {
     lastHelperAgentUseTime: number | null; // unix timestamp
     lastManualReadTime: number | null; // unix timestamp
     messagesToMe: string[]; // Stores the history of "message to me" self-directions
+    queuedResearcherInstruction: string | null;
+    turnCheckpoints: Record<number, LM0Checkpoint>;
+    runRevision: number; // Scheduler nonce used to rerun the same turn after rollback.
 }
 
 export type LM0Action =
@@ -124,7 +149,11 @@ export type LM0Action =
   | { type: 'ADD_LOG'; payload: { message: string } }
   | { type: 'ADD_HISTORY'; payload: { entry: HistoryEntry } }
   | { type: 'ADD_MESSAGE_TO_ME'; payload: { message: string } }
+  | { type: 'CLEAR_CONSECUTIVE_ERRORS' }
   | { type: 'ROLLBACK_TO_TURN'; payload: { turnNumber: number } }
+  | { type: 'RESTORE_CHECKPOINT'; payload: { checkpoint: LM0Checkpoint; status?: 'running' | 'paused' } }
+  | { type: 'QUEUE_RESEARCHER_INSTRUCTION'; payload: { instruction: string } }
+  | { type: 'CONSUME_RESEARCHER_INSTRUCTION' }
   | { type: 'UPDATE_VIRTUAL_FILE'; payload: { fileId: VirtualFileId; content: string } }
   | { type: 'ADD_HUB_MESSAGE'; payload: { message: HubMessage } }
   | { type: 'MARK_CHALLENGE_DONE'; payload: { challengeNumber: number } }
