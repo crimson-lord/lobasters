@@ -377,6 +377,7 @@ export function ExaminationConfigurationTools({
     onReset,
     onDownloadReport,
   };
+  const hasRegisteredToolsRef = useRef(false);
 
   const registrationPhase = state.status === 'running'
     ? 'running'
@@ -385,6 +386,8 @@ export function ExaminationConfigurationTools({
       : step;
 
   useEffect(() => {
+    if (hasRegisteredToolsRef.current) return;
+    hasRegisteredToolsRef.current = true;
     const controller = new AbortController();
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let attempts = 0;
@@ -395,6 +398,133 @@ export function ExaminationConfigurationTools({
         if (attempts++ < 50) retryTimer = setTimeout(registerTools, 100);
         return;
       }
+      const activeModelContext = modelContext;
+      void activeModelContext.registerTool({
+        name: 'lobasters_examination',
+        description: [
+          'Control the full Lobasters Examination through WebMCP. This persistent command avoids browser registration limits while the page changes phase.',
+          'Use action "configure" to complete both model surveys, session values, and optional full prompts in ONE call. API keys are write-only.',
+          'Use get_configuration to read all live editable values. Other actions are available when their matching phase exists: finalize_system_prompts, start, get_status, get_raw_transcript, copy_raw_transcript, download_report, and run_another.',
+        ].join('\n\n'),
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            action: {
+              type: 'string',
+              enum: [
+                'get_configuration',
+                'configure',
+                'finalize_system_prompts',
+                'start',
+                'get_status',
+                'get_raw_transcript',
+                'copy_raw_transcript',
+                'download_report',
+                'run_another',
+              ],
+              description: 'The Examination operation to perform.',
+            },
+            teacher: { ...agentInputSchema, description: 'Teacher fields used only with configure. Omitted fields are preserved.' },
+            student: { ...agentInputSchema, description: 'Student fields used only with configure. Omitted fields are preserved.' },
+            session: { ...sessionInputSchema, description: 'Session fields used only with configure. Omitted fields are preserved.' },
+            teacherSystemPrompt: { type: 'string', description: 'Complete Teacher prompt for configure or finalize_system_prompts.' },
+            studentSystemPrompt: { type: 'string', description: 'Complete Student prompt for configure or finalize_system_prompts.' },
+            format: { type: 'string', enum: ['pdf', 'markdown'], description: 'Required for download_report.' },
+          },
+          required: ['action'],
+        },
+        execute: async (input: Record<string, unknown>) => {
+          const action = requireString(input, 'action');
+          const current = latestRef.current;
+          const transcript = current.state.transcript;
+
+          if (action === 'get_configuration') {
+            return result(examinationConfigurationSnapshot(current));
+          }
+          if (action === 'configure') {
+            if (current.step !== 'models') throw new Error('Configuration is available only before the Examination review step.');
+            const teacherInput = optionalObject(input, 'teacher');
+            const studentInput = optionalObject(input, 'student');
+            const sessionInput = optionalObject(input, 'session');
+            const nextTeacher = teacherInput ? patchAgent(current.teacherConfig, teacherInput) : current.teacherConfig;
+            const nextStudent = studentInput ? patchAgent(current.studentConfig, studentInput) : current.studentConfig;
+            const nextSession = sessionInput ? patchSession(current.examConfig, sessionInput) : current.examConfig;
+            const teacherPrompt = hasOwn(input, 'teacherSystemPrompt') ? requireString(input, 'teacherSystemPrompt') : undefined;
+            const studentPrompt = hasOwn(input, 'studentSystemPrompt') ? requireString(input, 'studentSystemPrompt') : undefined;
+            if (teacherPrompt !== undefined && !teacherPrompt.trim()) throw new Error('teacherSystemPrompt cannot be empty when supplied.');
+            if (studentPrompt !== undefined && !studentPrompt.trim()) throw new Error('studentSystemPrompt cannot be empty when supplied.');
+            current.setTeacherConfig(teacherPrompt === undefined ? nextTeacher : { ...nextTeacher, systemPrompt: teacherPrompt });
+            current.setStudentConfig(studentPrompt === undefined ? nextStudent : { ...nextStudent, systemPrompt: studentPrompt });
+            current.setExamConfig(nextSession);
+            if (teacherPrompt !== undefined) current.setPromptModeTeacher('custom');
+            if (studentPrompt !== undefined) current.setPromptModeStudent('custom');
+            current.onContinueToReview();
+            return result(JSON.stringify({
+              message: 'Entire Examination configuration saved in one command. Opening system-prompt review.',
+              teacher: publicAgentConfiguration(nextTeacher),
+              student: publicAgentConfiguration(nextStudent),
+              session: nextSession,
+            }, null, 2));
+          }
+          if (action === 'finalize_system_prompts') {
+            if (current.step !== 'review') throw new Error('System prompts can be finalized only during review.');
+            if (hasOwn(input, 'teacherSystemPrompt')) {
+              const prompt = requireString(input, 'teacherSystemPrompt');
+              if (!prompt.trim()) throw new Error('teacherSystemPrompt cannot be empty when supplied.');
+              current.setPromptModeTeacher('custom');
+              current.setTeacherConfig({ ...current.teacherConfig, systemPrompt: prompt });
+            }
+            if (hasOwn(input, 'studentSystemPrompt')) {
+              const prompt = requireString(input, 'studentSystemPrompt');
+              if (!prompt.trim()) throw new Error('studentSystemPrompt cannot be empty when supplied.');
+              current.setPromptModeStudent('custom');
+              current.setStudentConfig({ ...current.studentConfig, systemPrompt: prompt });
+            }
+            return result('Examination system prompts finalized. Omitted prompts were kept unchanged.');
+          }
+          if (action === 'start') {
+            if (current.step !== 'review') throw new Error('The Examination must be configured and reviewed before it can start.');
+            await current.onStart();
+            return result('Examination is starting. Use get_status while the models work.');
+          }
+          if (action === 'get_status') {
+            if (current.state.status !== 'running') throw new Error('No Examination is currently running.');
+            return result(JSON.stringify({
+              status: current.state.status,
+              phase: current.state.currentPhase,
+              completedTurns: transcript?.turns.length ?? 0,
+              questionCount: current.state.config?.questionCount ?? null,
+              activity: current.state.activityMessage,
+            }, null, 2));
+          }
+          if (action === 'get_raw_transcript') {
+            if (!transcript) throw new Error('No Examination transcript is available.');
+            return result(JSON.stringify(sanitizedTranscript(transcript), null, 2));
+          }
+          if (action === 'copy_raw_transcript') {
+            if (!transcript) throw new Error('No Examination transcript is available.');
+            await copyTranscriptToClipboard(JSON.stringify(sanitizedTranscript(transcript), null, 2));
+            return result('The sanitized raw Examination transcript was copied to the system clipboard.');
+          }
+          if (action === 'download_report') {
+            if (current.state.status !== 'finished' || !transcript) throw new Error('A completed Examination report is required before downloading.');
+            const format = requireString(input, 'format') as ReportFormat;
+            if (format !== 'pdf' && format !== 'markdown') throw new Error('format must be pdf or markdown.');
+            current.onDownloadReport(format);
+            return result(`Downloading the completed Examination report as ${format === 'pdf' ? 'PDF' : 'Markdown'}.`);
+          }
+          if (action === 'run_another') {
+            current.onReset();
+            return result('Starting a new Examination. Returning to model configuration.');
+          }
+          throw new Error('Unsupported Examination action.');
+        },
+      }, { signal: controller.signal }).catch(() => {
+        // The human-facing workflow remains usable when WebMCP is unavailable.
+      });
+      return;
+
       const register = (tool: WebMcpTool) => {
         void modelContext.registerTool(tool, { signal: controller.signal }).catch(() => {
           // Unsupported browsers retain the normal researcher-facing workflow.
@@ -598,9 +728,7 @@ export function ExaminationConfigurationTools({
       controller.abort();
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [
-    registrationPhase,
-  ]);
+  }, []);
 
   return null;
 }
