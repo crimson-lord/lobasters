@@ -348,6 +348,21 @@ export function ExaminationConfigurationTools({
             inputSchema: noInputSchema,
             execute: () => result(JSON.stringify(sanitizedTranscript(state.transcript!), null, 2)),
           });
+          register({
+            name: 'lobasters_copy_raw_examination_transcript',
+            description:
+              'Copy the complete API-key-sanitized raw Examination transcript to the system clipboard. This is a direct WebMCP action and does not use the researcher-facing button.',
+            inputSchema: noInputSchema,
+            execute: async () => {
+              const rawTranscript = JSON.stringify(sanitizedTranscript(state.transcript!), null, 2);
+              try {
+                await navigator.clipboard.writeText(rawTranscript);
+              } catch {
+                throw new Error('The browser denied clipboard access. Allow clipboard access and try again.');
+              }
+              return result('The sanitized raw Examination transcript was copied to the system clipboard.');
+            },
+          });
         }
         if (state.status === 'finished' && state.transcript) {
           register({
