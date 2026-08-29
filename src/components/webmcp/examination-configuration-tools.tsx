@@ -298,6 +298,27 @@ function sanitizedTranscript(transcript: NonNullable<ProvingGroundState['transcr
   return copy;
 }
 
+async function copyTranscriptToClipboard(rawTranscript: string) {
+  try {
+    await navigator.clipboard.writeText(rawTranscript);
+    return;
+  } catch {
+    // WebMCP invocations do not always count as a browser activation. Fall
+    // back to the legacy in-page copy path for runtimes that still permit it.
+    const textarea = document.createElement('textarea');
+    textarea.value = rawTranscript;
+    textarea.setAttribute('readonly', '');
+    textarea.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    textarea.remove();
+    if (!copied) {
+      throw new Error('The browser denied clipboard access. Allow clipboard access and try again.');
+    }
+  }
+}
+
 /** WebMCP layer over the existing researcher-facing Examination workflow. */
 export function ExaminationConfigurationTools({
   step,
@@ -420,11 +441,7 @@ export function ExaminationConfigurationTools({
               const transcript = latestRef.current.state.transcript;
               if (!transcript) throw new Error('No Examination transcript is available.');
               const rawTranscript = JSON.stringify(sanitizedTranscript(transcript), null, 2);
-              try {
-                await navigator.clipboard.writeText(rawTranscript);
-              } catch {
-                throw new Error('The browser denied clipboard access. Allow clipboard access and try again.');
-              }
+              await copyTranscriptToClipboard(rawTranscript);
               return result('The sanitized raw Examination transcript was copied to the system clipboard.');
             },
           });
