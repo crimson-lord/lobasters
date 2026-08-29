@@ -526,7 +526,7 @@ export function ExaminationConfigurationTools({
       return;
 
       const register = (tool: WebMcpTool) => {
-        void modelContext.registerTool(tool, { signal: controller.signal }).catch(() => {
+        void activeModelContext.registerTool(tool, { signal: controller.signal }).catch(() => {
           // Unsupported browsers retain the normal researcher-facing workflow.
         });
       };
