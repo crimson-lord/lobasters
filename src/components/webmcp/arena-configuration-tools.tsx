@@ -535,6 +535,9 @@ export function ArenaConfigurationTools(props: ArenaConfigurationToolsProps) {
             return result(publicConfiguration(current.agentAConfig, current.agentBConfig, current.sessionConfig, current.promptModeA, current.promptModeB, current.step, current.isArenaRunning));
           }
           if (action === 'configure') {
+            if (current.isArenaRunning) {
+              throw new Error('Stop the live Arena before changing its configuration.');
+            }
             const configuration = optionalObject(input, 'configuration');
             if (!configuration) throw new Error('configuration is required for configure.');
             const requestedTemplate = hasOwn(configuration, 'template')
@@ -573,6 +576,7 @@ export function ArenaConfigurationTools(props: ArenaConfigurationToolsProps) {
             });
           }
           if (action === 'start') {
+            if (current.isArenaRunning) throw new Error('The Arena is already running.');
             if (current.step !== 'review') throw new Error('The Arena must be configured and reviewed before it can start. Use configure first.');
             const template = current.sessionConfig.scenarioType;
             if (!template) throw new Error('Choose an Arena template before starting.');
