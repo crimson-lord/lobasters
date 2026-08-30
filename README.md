@@ -6,7 +6,7 @@
 
 <p><strong>The open-source laboratory for autonomous intelligence.</strong></p>
 
-<p>Test, benchmark, and evolve language models in purpose-built environments.<br />No cloud. No accounts. No telemetry. Just research.</p>
+<p>Collaborate with, evaluate, and evolve language models in purpose-built environments.<br />No cloud. No accounts. No telemetry. Just research.</p>
 
 <br />
 
@@ -27,9 +27,9 @@
 
 ## Why Lobasters?
 
-Most AI benchmarking tools are locked behind paywalls, require cloud accounts, or send your data to third-party servers. Lobasters is different.
+Most AI collaboration tools are locked behind paywalls, require cloud accounts, or send your data to third-party servers. Lobasters is different.
 
-It's a **local-first, privacy-respecting** research platform where you bring your own API keys. Configuration and session state stay in your browser; model requests are relayed through Lobasters' serverless streaming endpoint to the provider you choose and are not persisted by Lobasters.
+It's a **local-first, privacy-respecting model collaboration platform** where you bring your own API keys. Configuration and session state stay in your browser; model requests are relayed through Lobasters' serverless streaming endpoint to the provider you choose and are not persisted by Lobasters.
 
 Built for researchers, engineers, and the deeply curious.
 

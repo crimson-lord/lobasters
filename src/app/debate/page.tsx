@@ -120,27 +120,41 @@ export default function DebatePage() {
     }
   }, [state.messages]);
 
-  const handleStartDebate = async () => {
+  const handleStartDebate = async (configuration?: {
+    agentAConfig: AgentConfig;
+    agentBConfig: AgentConfig;
+    sessionConfig: Omit<DebateConfig, 'agentA' | 'agentB'>;
+    promptModeA: PromptMode;
+    promptModeB: PromptMode;
+  }) => {
     setIsStarting(true);
     setStartError(null);
 
     try {
+        const source = configuration ?? {
+          agentAConfig,
+          agentBConfig,
+          sessionConfig: debateConfig,
+          promptModeA,
+          promptModeB,
+        };
         const finalConfig: DebateConfig = {
-            ...debateConfig,
+            ...source.sessionConfig,
             agentA: {
-                ...agentAConfig,
-                systemPrompt: promptModeA === 'template'
-                    ? constructSystemPrompt('A', { ...debateConfig, agentA: agentAConfig, agentB: agentBConfig }, debateConfig.agentIsPro === 'A')
-                    : agentAConfig.systemPrompt,
+                ...source.agentAConfig,
+                systemPrompt: source.promptModeA === 'template'
+                    ? constructSystemPrompt('A', { ...source.sessionConfig, agentA: source.agentAConfig, agentB: source.agentBConfig }, source.sessionConfig.agentIsPro === 'A')
+                    : source.agentAConfig.systemPrompt,
             },
             agentB: {
-                ...agentBConfig,
-                systemPrompt: promptModeB === 'template'
-                    ? constructSystemPrompt('B', { ...debateConfig, agentA: agentAConfig, agentB: agentBConfig }, debateConfig.agentIsPro === 'B')
-                    : agentBConfig.systemPrompt,
+                ...source.agentBConfig,
+                systemPrompt: source.promptModeB === 'template'
+                    ? constructSystemPrompt('B', { ...source.sessionConfig, agentA: source.agentAConfig, agentB: source.agentBConfig }, source.sessionConfig.agentIsPro === 'B')
+                    : source.agentBConfig.systemPrompt,
             },
         };
 
+        setDebateConfig(source.sessionConfig);
         setAgentAConfig(finalConfig.agentA);
         setAgentBConfig(finalConfig.agentB);
 
@@ -313,9 +327,7 @@ export default function DebatePage() {
           setPromptModeA={setPromptModeA}
           promptModeB={promptModeB}
           setPromptModeB={setPromptModeB}
-          onSelectTemplate={applyTemplate}
-          onContinueFromModels={() => setStep('topic')}
-          onContinueToPrompts={() => setStep('review')}
+          onOpenReview={() => setStep('review')}
           onStartArena={handleStartDebate}
           isArenaRunning={state.isDebating}
           onStopArena={handleStopDebate}
