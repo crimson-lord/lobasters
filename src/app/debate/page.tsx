@@ -576,7 +576,7 @@ function ReviewStep({
         <Button variant="outline" size="lg" onClick={onBack}>
           <ChevronLeft className="mr-2 h-4 w-4" /> Back
         </Button>
-        <Button size="lg" onClick={onStart} disabled={isStarting}>
+        <Button size="lg" onClick={() => void onStart()} disabled={isStarting}>
             {isStarting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Start Arena
         </Button>
