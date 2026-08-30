@@ -35,7 +35,7 @@ export default function SearchPage() {
       <ul>
         <li>The service is provided "as is" and "as available".</li>
         <li>Users are solely responsible for the API keys they provide.</li>
-        <li>All user-provided API keys are stored exclusively in the user's browser (localStorage).</li>
+        <li>API keys are not persisted by Lobasters; they are relayed only while calling the provider selected by the user.</li>
         <li>Full terms are available at <Link href="/terms" style={{ color: '#8ab4f8' }}>/terms</Link>.</li>
       </ul>
       
@@ -44,7 +44,7 @@ export default function SearchPage() {
       <h3>Privacy Policy Summary</h3>
       <ul>
         <li>Lobasters is local-first. We do not use centralized authentication or store user data server-side.</li>
-        <li>We do NOT collect, store, or have access to the content of your sessions or API keys.</li>
+        <li>We do not persist session contents or API keys. Model requests pass through a streaming relay to the provider selected by the user.</li>
         <li>Application settings are stored locally in the user's browser.</li>
         <li>Full policy is available at <Link href="/privacy" style={{ color: '#8ab4f8' }}>/privacy</Link>.</li>
       </ul>

@@ -29,7 +29,7 @@
 
 Most AI benchmarking tools are locked behind paywalls, require cloud accounts, or send your data to third-party servers. Lobasters is different.
 
-It's a **local-first, privacy-respecting** research platform where you bring your own API keys and everything runs in your browser. Your prompts, your results, your data — never leaves your machine.
+It's a **local-first, privacy-respecting** research platform where you bring your own API keys. Configuration and session state stay in your browser; model requests are relayed through Lobasters' serverless streaming endpoint to the provider you choose and are not persisted by Lobasters.
 
 Built for researchers, engineers, and the deeply curious.
 
@@ -94,7 +94,7 @@ pnpm install    # or: npm install
 pnpm dev        # or: npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and enter your API keys directly in the browser. They are stored **only** in `localStorage` and are never transmitted to any server.
+Open [http://localhost:3000](http://localhost:3000) and enter your API keys directly in the browser. Lobasters does not persist them; they are sent only for the duration of a model request through the streaming relay to your selected provider.
 
 ### Production Build
 
@@ -139,8 +139,8 @@ lobasters/
 
 | Principle | Implementation |
 |---|---|
-| **Local-first** | Zero cloud dependencies. No accounts, no databases, no analytics. |
-| **Privacy by design** | API keys live in `localStorage`. Session data never leaves the browser. |
+| **Local-first** | No accounts, database, or analytics; configuration and session state remain browser-local. |
+| **Privacy by design** | API keys are not persisted by Lobasters; model requests are relayed only to the provider selected by the researcher. |
 | **Model-agnostic** | Works with any OpenAI-compatible API endpoint. |
 | **Observable** | Full reasoning capture, raw request/response inspection, thinking chain visibility. |
 | **Resilient** | Automatic retry with exponential backoff. Sessions survive transient API failures. |
