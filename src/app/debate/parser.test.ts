@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createVisibleContentDeltaFilter, parseResponse } from './parser';
+import { parseResponse } from './parser';
 import type { AgentConfig } from './types';
 
 function agentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -149,41 +149,5 @@ describe('parseResponse', () => {
       speak: 'Provider refusal: I cannot help with that request.',
       usedReasoningAsSpeech: false,
     });
-  });
-});
-
-describe('createVisibleContentDeltaFilter', () => {
-  it('never emits tagged reasoning and emits only the speak section', () => {
-    const filter = createVisibleContentDeltaFilter(agentConfig({
-      reasoningCaptureMethod: 'tags',
-    }));
-    const chunks = [
-      '<think',
-      'ing>private chain',
-      ' of thought</think',
-      'ing><speak>Public answer.</speak>',
-    ];
-
-    const visible = chunks.map(filter).join('');
-
-    expect(visible).toBe('Public answer.');
-    expect(visible).not.toContain('private chain of thought');
-    expect(visible).not.toContain('<thinking>');
-  });
-
-  it('streams speak text correctly when both tags are split across chunks', () => {
-    const filter = createVisibleContentDeltaFilter(agentConfig({
-      reasoningCaptureMethod: 'tags',
-    }));
-    const chunks = ['<sp', 'eak>Hel', 'lo wor', 'ld</spe', 'ak>'];
-
-    expect(chunks.map(filter)).toEqual(['', 'Hel', 'lo wor', 'ld', '']);
-  });
-
-  it('passes ordinary untagged content through unchanged', () => {
-    const filter = createVisibleContentDeltaFilter(agentConfig());
-    const chunks = ['An ordinary ', 'untagged ', 'response.'];
-
-    expect(chunks.map(filter)).toEqual(chunks);
   });
 });

@@ -8,7 +8,6 @@ import {
   AgentID,
 } from './types';
 import { fetchAgentResponse } from './agent';
-import { createVisibleContentDeltaFilter } from './parser';
 
 
 const initialDebateState: DebateState = {
@@ -48,15 +47,6 @@ function debateReducer(state: DebateState, action: DebateAction): DebateState {
                 msg.id === action.payload.id ? { ...msg, ...action.payload } : msg
             ),
         };
-    case 'APPEND_TO_MESSAGE': {
-        const { id, contentChunk } = action.payload;
-        return {
-            ...state,
-            messages: state.messages.map(msg =>
-                msg.id === id ? { ...msg, content: msg.content + contentChunk } : msg
-            ),
-        };
-    }
     case 'END_DEBATE':
       return { ...state, isDebating: false, winner: action.payload.winner };
     case 'GIVE_UP': {
@@ -164,22 +154,12 @@ export function useDebateEngine(initialConfig: DebateConfig) {
           currentThinkingMessageId = thinkingMessage.id;
           dispatchTracked({ type: 'ADD_MESSAGE', payload: thinkingMessage });
 
-          const filterVisibleDelta = createVisibleContentDeltaFilter(currentAgentConfig);
-
           const response = await fetchAgentResponse(
             currentAgentConfig,
             stateRef.current.messages,
             prompt,
             currentAgentId,
             stateRef.current.config!,
-            (delta) => {
-              if (typeof delta.content === 'string') {
-                const visibleChunk = filterVisibleDelta(delta.content);
-                if (visibleChunk) {
-                  dispatchTracked({ type: 'APPEND_TO_MESSAGE', payload: { id: thinkingMessage.id, contentChunk: visibleChunk } });
-                }
-              }
-            },
           );
         const { speak: visibleMessage, thinking: privateReasoning, usedReasoningAsSpeech, rawRequest, rawResponse } = response;
         const hasToolCalls = Array.isArray(rawResponse.tool_calls) && rawResponse.tool_calls.length > 0;
@@ -199,8 +179,8 @@ export function useDebateEngine(initialConfig: DebateConfig) {
         }
         const responseNotice = responseNotices.length ? responseNotices.join(' ') : null;
 
-        // Replace the raw streamed buffer with the parser's final normalized
-        // speech. This removes reasoning tags and handles reasoning-only models.
+        // Publish only the completed, normalized response. The provider stream
+        // is collected silently so partial reasoning or markup never flashes.
         dispatchTracked({
           type: 'UPDATE_MESSAGE',
           payload: {

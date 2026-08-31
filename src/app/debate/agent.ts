@@ -14,7 +14,6 @@ export async function fetchAgentResponse(
   prompt: string,
   currentAgentId: AgentID,
   debateConfig: DebateConfig,
-  onDelta?: (delta: Record<string, unknown>) => void,
 ): Promise<DebateResponse> {
   // Researcher prompts remain intact; Lobasters adds a small authoritative
   // runtime guard so transcript text cannot make the two participants swap.
@@ -111,7 +110,7 @@ export async function fetchAgentResponse(
     const { rawRequest, rawResponse } = await runDebateTurn({
       history: messagesForApi,
       agentConfig,
-    }, onDelta);
+    });
     
     const parsed = parseResponse(rawResponse, agentConfig);
 

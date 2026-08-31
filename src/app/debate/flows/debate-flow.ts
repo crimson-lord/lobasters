@@ -1,18 +1,16 @@
 import OpenAI from 'openai';
-import { AgentConfig, ApiMessage } from '../types';
+import { AgentConfig } from '../types';
 import { collectChatCompletion } from '@/lib/chat-stream';
 
-// Interface for the input to this server action
 interface DebateTurnInput {
   history: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
   agentConfig: AgentConfig;
 }
 
-// The route streams provider chunks straight to the browser. Arena consumes
-// those chunks live; the same transport is collected silently in other modes.
+// The shared route uses a streaming transport, but Arena collects it silently
+// and publishes only the completed response.
 export async function runDebateTurn(
   input: DebateTurnInput,
-  onDelta?: (delta: Record<string, unknown>) => void,
 ): Promise<{ rawRequest: Record<string, unknown>; rawResponse: any }> {
   const { history, agentConfig } = input;
 
@@ -102,9 +100,10 @@ export async function runDebateTurn(
       : {}),
   };
 
+  // Keep the streaming transport for timeout resilience, but collect it
+  // silently. Arena publishes only the completed, parsed model response.
   return collectChatCompletion(
     { baseURL: agentConfig.baseURL, apiKey },
     requestPayload,
-    onDelta,
   );
 }

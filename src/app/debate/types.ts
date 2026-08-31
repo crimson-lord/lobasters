@@ -107,7 +107,6 @@ export type DebateAction =
   | { type: 'START_DEBATE'; payload: { config: DebateConfig } }
   | { type: 'ADD_MESSAGE'; payload: Message }
   | { type: 'UPDATE_MESSAGE'; payload: Partial<Message> & { id: number } }
-  | { type: 'APPEND_TO_MESSAGE'; payload: { id: number, contentChunk: string } }
   | { type: 'END_DEBATE'; payload: { winner: Winner } }
   | { type: 'GIVE_UP'; payload: { winner: Winner; reason: string; givingUpAgent: AgentID | 'SYSTEM' } }
   | { type: 'SWITCH_TURN' }

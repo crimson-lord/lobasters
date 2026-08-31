@@ -691,7 +691,7 @@ function DebateSession({ state, chatContainerRef, onStop, onReset }: DebateSessi
                       </Collapsible>
                   )}
                   <div className="p-3 markdown-content text-base">
-                    {msg.isLoading && !msg.content ? (
+                    {msg.isLoading ? (
                       <div className="flex items-center justify-center space-x-2 p-2">
                         <div className="h-2 w-2 bg-foreground/60 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
                         <div className="h-2 w-2 bg-foreground/60 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
@@ -704,7 +704,6 @@ function DebateSession({ state, chatContainerRef, onStop, onReset }: DebateSessi
                         ) : msg.rawResponse?.tool_calls?.length ? (
                           <p className="text-muted-foreground italic">Tool call issued; processing its result…</p>
                         ) : null}
-                        {msg.isLoading && msg.content && <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-current align-middle" />}
                       </>
                     )}
                   </div>
