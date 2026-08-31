@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import { inlineCode } from './markdown';
 
 export const runtime = 'nodejs';
 
@@ -52,10 +53,6 @@ function string(value: unknown, fallback = '') {
   return typeof value === 'string' ? value : fallback;
 }
 
-function code(value: unknown) {
-  return string(value, 'Not configured').replace(/`/g, '\\`');
-}
-
 function sectionText(value: unknown, fallback = '*No data captured.*') {
   const text = string(value).trim();
   return text || fallback;
@@ -79,14 +76,14 @@ function markdownReport(state: JsonObject) {
   report += `- **Challenges complete:** ${completedChallenges}/${challenges.length}\n\n`;
 
   report += '## Model Configuration\n\n';
-  report += `- **Master model:** \`${code(master.modelName)}\`\n`;
-  report += `- **Master base URL:** \`${code(master.baseURL)}\`\n`;
+  report += `- **Master model:** ${inlineCode(master.modelName)}\n`;
+  report += `- **Master base URL:** ${inlineCode(master.baseURL)}\n`;
   report += `- **Master temperature:** ${Number.isFinite(Number(master.temperature)) ? Number(master.temperature) : 'Not configured'}\n`;
   report += `- **Reasoning capture:** ${string(master.reasoningCaptureMethod, 'none')}\n`;
   report += `- **Helper agents enabled:** ${Boolean(config.allowHelperAgents)}\n`;
   if (helpers.length) {
     report += helpers.map((helper: JsonObject) =>
-      `  - **${string(helper.nickname, string(helper.id, 'Helper'))}:** \`${code(helper.modelName)}\` via \`${code(helper.baseURL)}\``,
+      `  - **${string(helper.nickname, string(helper.id, 'Helper'))}:** ${inlineCode(helper.modelName)} via ${inlineCode(helper.baseURL)}`,
     ).join('\n');
     report += '\n';
   }
