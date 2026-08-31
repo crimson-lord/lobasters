@@ -22,6 +22,14 @@ export async function runDebateTurn(
     throw new Error("No API key found. Please enter your API key in the Arena Settings.");
   }
 
+  const isOpenRouter = (() => {
+    try {
+      return new URL(agentConfig.baseURL).hostname.toLowerCase() === 'openrouter.ai';
+    } catch {
+      return false;
+    }
+  })();
+
   const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
 
   // Add Give Up tool only if enabled
@@ -86,7 +94,12 @@ export async function runDebateTurn(
     tools: tools.length > 0 ? tools : undefined,
     tool_choice: tools.length > 0 ? 'auto' : undefined,
     max_tokens: agentConfig.maxTokens || 4096,
-    ...(agentConfig.canThink ? { extra_body: { include_reasoning: true } } : {}),
+    // OpenRouter's unified reasoning control is a top-level request field.
+    // Other OpenAI-compatible providers vary, so they use the tag protocol or
+    // their native default rather than receiving an unsupported vendor field.
+    ...(agentConfig.canThink && isOpenRouter
+      ? { reasoning: { enabled: true, exclude: false } }
+      : {}),
   };
 
   return collectChatCompletion(

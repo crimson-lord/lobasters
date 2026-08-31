@@ -17,6 +17,19 @@ const encoder = new TextEncoder();
 const event = (name: string, payload: unknown) =>
   encoder.encode(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`);
 
+function mergeStreamValue(current: unknown, incoming: unknown): unknown {
+  if (typeof current === 'string' && typeof incoming === 'string') return current + incoming;
+  if (Array.isArray(current) && Array.isArray(incoming)) return [...current, ...incoming];
+  if (current && incoming && typeof current === 'object' && typeof incoming === 'object' && !Array.isArray(current) && !Array.isArray(incoming)) {
+    const merged: Record<string, unknown> = { ...(current as Record<string, unknown>) };
+    for (const [key, value] of Object.entries(incoming as Record<string, unknown>)) {
+      merged[key] = key in merged ? mergeStreamValue(merged[key], value) : value;
+    }
+    return merged;
+  }
+  return incoming;
+}
+
 /** Streams an OpenAI-compatible completion without exposing provider keys to the browser. */
 export async function POST(request: Request) {
   let input: StreamInput;
@@ -62,11 +75,16 @@ export async function POST(request: Request) {
 
         const message: Record<string, any> = { role: 'assistant', content: '' };
         for await (const chunk of providerStream) {
-          const delta = chunk.choices[0]?.delta as Record<string, any> | undefined;
+          const choice = chunk.choices[0];
+          const delta = choice?.delta as Record<string, any> | undefined;
+          if (choice?.finish_reason) message.finish_reason = choice.finish_reason;
+          if (chunk.usage) message.usage = chunk.usage;
           if (!delta) continue;
 
           if (typeof delta.content === 'string') {
             message.content = (message.content || '') + delta.content;
+          } else if (delta.content != null) {
+            message.content = mergeStreamValue(message.content, delta.content);
           }
           if (Array.isArray(delta.tool_calls)) {
             message.tool_calls ||= [];
@@ -91,9 +109,7 @@ export async function POST(request: Request) {
           }
           for (const [key, value] of Object.entries(delta)) {
             if (key !== 'role' && key !== 'content' && key !== 'tool_calls' && value != null) {
-              message[key] = typeof message[key] === 'string' && typeof value === 'string'
-                ? message[key] + value
-                : value;
+              message[key] = key in message ? mergeStreamValue(message[key], value) : value;
             }
           }
           controller.enqueue(event('delta', delta));

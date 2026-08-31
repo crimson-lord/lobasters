@@ -519,7 +519,7 @@ function ReviewStep({
         <CardTitle>Step 3: Review System Prompts</CardTitle>
         <CardContent>
             <p className="text-sm text-muted-foreground mt-2">
-                These are the final instructions that will be given to each agent.
+                These are the researcher-defined instructions. Lobasters appends a small runtime identity and response-format guard when the session runs.
             </p>
         </CardContent>
       </CardHeader>
@@ -636,6 +636,10 @@ function RawTranscriptDialog({ messages }: { messages: Message[] }) {
 }
 
 function DebateSession({ state, chatContainerRef, onStop, onReset }: DebateSessionProps) {
+  const turnNickname = state.currentTurn === 'A'
+    ? state.config?.agentA.nickname
+    : state.config?.agentB.nickname;
+
   return (
     <div className="flex flex-col h-[85vh] animate-fade-in-up">
       <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/50 rounded-lg border no-scrollbar">
@@ -653,7 +657,22 @@ function DebateSession({ state, chatContainerRef, onStop, onReset }: DebateSessi
                 <div className={cn("max-w-[75%] rounded-lg text-base transition-all duration-300 relative", 
                   msg.author === 'A' ? 'bg-primary/10' : 'bg-secondary'
                 )}>
-                  {msg.privateReasoning && (
+                  <div className="px-3 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Agent {msg.author} · {msg.author === 'A'
+                      ? (state.config?.agentA.nickname || 'Agent A')
+                      : (state.config?.agentB.nickname || 'Agent B')}
+                  </div>
+                  {msg.responseNotice && (
+                    <div className={cn(
+                      "mx-3 mt-2 rounded border px-2 py-1 text-xs",
+                      msg.reasoningUsedAsContent
+                        ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200"
+                        : "border-white/10 bg-black/10 text-muted-foreground",
+                    )}>
+                      {msg.responseNotice}
+                    </div>
+                  )}
+                  {msg.privateReasoning && !msg.reasoningUsedAsContent && (
                       <Collapsible className="border-b border-white/5">
                           <CollapsibleTrigger asChild>
                               <Button variant="ghost" size="sm" className="w-full justify-start p-2 text-xs text-muted-foreground rounded-none">
@@ -672,14 +691,21 @@ function DebateSession({ state, chatContainerRef, onStop, onReset }: DebateSessi
                       </Collapsible>
                   )}
                   <div className="p-3 markdown-content text-base">
-                    {msg.isLoading ? (
+                    {msg.isLoading && !msg.content ? (
                       <div className="flex items-center justify-center space-x-2 p-2">
                         <div className="h-2 w-2 bg-foreground/60 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
                         <div className="h-2 w-2 bg-foreground/60 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
                         <div className="h-2 w-2 bg-foreground/60 rounded-full animate-bounce"></div>
                       </div>
                     ) : (
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                      <>
+                        {msg.content ? (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                        ) : msg.rawResponse?.tool_calls?.length ? (
+                          <p className="text-muted-foreground italic">Tool call issued; processing its result…</p>
+                        ) : null}
+                        {msg.isLoading && msg.content && <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-current align-middle" />}
+                      </>
                     )}
                   </div>
               </div>
@@ -690,7 +716,12 @@ function DebateSession({ state, chatContainerRef, onStop, onReset }: DebateSessi
       </div>
       <div className="mt-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          {state.isDebating && <div className="text-sm text-muted-foreground font-mono">Current: Agent {state.currentTurn}</div>}
+          {state.isDebating && (
+            <div className="text-sm text-muted-foreground font-mono">
+              {state.messages.some(message => message.isLoading) ? 'Speaking now' : 'Next speaker'}: Agent {state.currentTurn}
+              {turnNickname ? ` · ${turnNickname}` : ''}
+            </div>
+          )}
           <RawTranscriptDialog messages={state.messages} />
         </div>
         <div className="flex gap-2 items-center">
@@ -972,9 +1003,15 @@ function AgentConfigForm({ agentId, config, setConfig }: AgentConfigFormProps) {
                 <Label className="flex items-center gap-2 font-bold text-primary">
                   <Brain className="h-4 w-4" /> Can our model think? (Neural Reasoning)
                 </Label>
-                <Switch 
+                <Switch
                   checked={config.canThink} 
-                  onCheckedChange={v => setConfig({...config, canThink: v})} 
+                  onCheckedChange={v => setConfig({
+                    ...config,
+                    canThink: v,
+                    reasoningCaptureMethod: v && config.reasoningCaptureMethod === 'none'
+                      ? 'all'
+                      : config.reasoningCaptureMethod,
+                  })}
                 />
               </div>
               

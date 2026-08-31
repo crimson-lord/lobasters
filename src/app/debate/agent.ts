@@ -1,6 +1,7 @@
 import { AgentConfig, DebateResponse, Message, AgentID, DebateConfig } from './types';
 import { runDebateTurn } from './flows/debate-flow';
 import { parseResponse } from './parser';
+import { constructResponseProtocol, constructRuntimeGuard } from './utils';
 import OpenAI from 'openai';
 
 /**
@@ -15,12 +16,17 @@ export async function fetchAgentResponse(
   debateConfig: DebateConfig,
   onDelta?: (delta: Record<string, unknown>) => void,
 ): Promise<DebateResponse> {
-  // Construct the full system prompt for the model
-  const fullPrompt = `${agentConfig.systemPrompt}\n\nUSER INSTRUCTION:\n${prompt}`;
+  // Researcher prompts remain intact; Lobasters adds a small authoritative
+  // runtime guard so transcript text cannot make the two participants swap.
+  const fullPrompt = [
+    agentConfig.systemPrompt,
+    constructRuntimeGuard(currentAgentId, debateConfig, debateConfig.agentIsPro === currentAgentId),
+    constructResponseProtocol(debateConfig, currentAgentId),
+  ].filter(Boolean).join('\n\n');
 
   // Map the global history into the specific perspective of this agent
   const agentMessages = history
-    .filter(m => !m.intendedFor || m.intendedFor === 'ALL' || m.intendedFor === currentAgentId)
+    .filter(m => !m.isLoading && (!m.intendedFor || m.intendedFor === 'ALL' || m.intendedFor === currentAgentId))
     .map(m => {
       // 1. Handle Tool responses separately
       if (m.role === 'tool') {
@@ -28,6 +34,15 @@ export async function fetchAgentResponse(
           role: 'tool',
           tool_call_id: m.tool_call_id,
           content: m.content
+        } as const;
+      }
+
+      // Arena-originated updates are control context, not words spoken by a
+      // human user. Keeping them as system messages prevents role confusion.
+      if (m.author === 'SYSTEM') {
+        return {
+          role: 'system',
+          content: `[ARENA SYSTEM] ${m.content}`,
         } as const;
       }
 
@@ -40,27 +55,56 @@ export async function fetchAgentResponse(
       // We do NOT prepend the nickname to the agent's own past messages (assistant role).
       // This prevents the model from thinking it needs to repeat its own name.
       let content = m.content;
-      if (m.author !== 'SYSTEM' && m.author !== currentAgentId) {
+      if (role === 'assistant' && typeof m.rawResponse?.content === 'string') {
+        content = m.rawResponse.content;
+      }
+      if (m.author !== currentAgentId) {
         const senderNickname = m.author === 'A'
           ? (debateConfig.agentA.nickname || 'Agent A')
           : (debateConfig.agentB.nickname || 'Agent B');
-        content = `${senderNickname}: ${m.content}`;
+        const senderId = m.author as AgentID;
+        content = `[OPPONENT — Agent ${senderId} — ${senderNickname}]\n${m.content}`;
       }
+
+      const reasoningContext = role !== 'assistant'
+        ? {}
+        : m.rawResponse?.reasoning_details != null
+          ? { reasoning_details: m.rawResponse.reasoning_details }
+          : m.rawResponse?.reasoning != null
+            ? { reasoning: m.rawResponse.reasoning }
+            : m.rawResponse?.reasoning_content != null
+              ? { reasoning_content: m.rawResponse.reasoning_content }
+              : {};
 
       return {
         role,
         content,
         // Pass through tool_calls if they were part of this assistant message
-        ...(m.rawResponse?.tool_calls ? { tool_calls: m.rawResponse.tool_calls } : {})
+        ...(role === 'assistant' && m.rawResponse?.tool_calls ? { tool_calls: m.rawResponse.tool_calls } : {}),
+        ...reasoningContext,
       } as any;
     });
   
   // Apply history limit if configured
-  const slicedAgentMessages = agentConfig.maxHistory ? agentMessages.slice(-agentConfig.maxHistory) : agentMessages;
+  let slicedAgentMessages = agentConfig.maxHistory ? agentMessages.slice(-agentConfig.maxHistory) : agentMessages;
+  if (agentConfig.maxHistory && slicedAgentMessages[0]?.role === 'tool') {
+    let startIndex = agentMessages.length - slicedAgentMessages.length - 1;
+    while (startIndex >= 0 && agentMessages[startIndex]?.role === 'tool') startIndex--;
+    const possibleToolCaller = agentMessages[startIndex] as any;
+    if (possibleToolCaller?.role === 'assistant' && possibleToolCaller.tool_calls) {
+      slicedAgentMessages = agentMessages.slice(startIndex);
+    } else {
+      slicedAgentMessages = slicedAgentMessages.filter(message => message.role !== 'tool');
+    }
+  }
 
   const messagesForApi: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: fullPrompt },
-      ...slicedAgentMessages
+      ...slicedAgentMessages,
+      {
+        role: 'user',
+        content: `[ARENA TURN CONTROL — Agent ${currentAgentId} only]\n${prompt}`,
+      },
     ];
 
   try {

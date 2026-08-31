@@ -66,6 +66,8 @@ export interface Message {
   isThinking?: boolean;
   isLoading?: boolean; // Transient loading state
   privateReasoning?: string | null;
+  reasoningUsedAsContent?: boolean;
+  responseNotice?: string | null;
   rawRequest?: any | null;
   rawResponse?: any | null;
   tool_call_id?: string; // For tool responses
@@ -79,6 +81,7 @@ export type ApiMessage = OpenAI.Chat.ChatCompletionMessageParam;
 export interface DebateResponse {
   thinking: string | null;
   speak: string;
+  usedReasoningAsSpeech: boolean;
   rawRequest: any;
   rawResponse: any;
 }
@@ -87,6 +90,7 @@ export interface DebateResponse {
 export interface ParsedDebateResponse {
   thinking: string | null;
   speak: string;
+  usedReasoningAsSpeech: boolean;
 }
 
 export interface DebateState {

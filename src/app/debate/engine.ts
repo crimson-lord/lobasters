@@ -8,6 +8,7 @@ import {
   AgentID,
 } from './types';
 import { fetchAgentResponse } from './agent';
+import { createVisibleContentDeltaFilter } from './parser';
 
 
 const initialDebateState: DebateState = {
@@ -52,7 +53,7 @@ function debateReducer(state: DebateState, action: DebateAction): DebateState {
         return {
             ...state,
             messages: state.messages.map(msg =>
-                msg.id === id ? { ...msg, content: msg.content + contentChunk, isLoading: false } : msg
+                msg.id === id ? { ...msg, content: msg.content + contentChunk } : msg
             ),
         };
     }
@@ -116,6 +117,11 @@ export function useDebateEngine(initialConfig: DebateConfig) {
   const stateRef = useRef(state);
   const isRunningTurn = useRef(false);
 
+  const dispatchTracked = useCallback((action: DebateAction) => {
+    stateRef.current = debateReducer(stateRef.current, action);
+    dispatch(action);
+  }, []);
+
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
@@ -156,7 +162,9 @@ export function useDebateEngine(initialConfig: DebateConfig) {
             intendedFor: 'ALL',
           };
           currentThinkingMessageId = thinkingMessage.id;
-          dispatch({ type: 'ADD_MESSAGE', payload: thinkingMessage });
+          dispatchTracked({ type: 'ADD_MESSAGE', payload: thinkingMessage });
+
+          const filterVisibleDelta = createVisibleContentDeltaFilter(currentAgentConfig);
 
           const response = await fetchAgentResponse(
             currentAgentConfig,
@@ -166,18 +174,41 @@ export function useDebateEngine(initialConfig: DebateConfig) {
             stateRef.current.config!,
             (delta) => {
               if (typeof delta.content === 'string') {
-                dispatch({ type: 'APPEND_TO_MESSAGE', payload: { id: thinkingMessage.id, contentChunk: delta.content } });
+                const visibleChunk = filterVisibleDelta(delta.content);
+                if (visibleChunk) {
+                  dispatchTracked({ type: 'APPEND_TO_MESSAGE', payload: { id: thinkingMessage.id, contentChunk: visibleChunk } });
+                }
               }
             },
           );
-        const { speak: visibleMessage, thinking: privateReasoning, rawRequest, rawResponse } = response;
+        const { speak: visibleMessage, thinking: privateReasoning, usedReasoningAsSpeech, rawRequest, rawResponse } = response;
+        const hasToolCalls = Array.isArray(rawResponse.tool_calls) && rawResponse.tool_calls.length > 0;
 
-        // Update the message with results and clear loading state, but preserve isThinking
-        dispatch({
+        if (!visibleMessage.trim() && !hasToolCalls) {
+          throw new Error('Provider returned neither final content, usable reasoning, nor a tool call.');
+        }
+
+        const responseNotices: string[] = [];
+        if (usedReasoningAsSpeech) {
+          responseNotices.push('The provider returned reasoning but no final-content field, so Lobasters preserved that reasoning as the visible response.');
+        } else if (currentAgentConfig.canThink && !privateReasoning) {
+          responseNotices.push('This model/provider returned final content without a separate reasoning trace.');
+        }
+        if (rawResponse.finish_reason === 'length') {
+          responseNotices.push('The provider stopped at its token limit, so this response may be incomplete.');
+        }
+        const responseNotice = responseNotices.length ? responseNotices.join(' ') : null;
+
+        // Replace the raw streamed buffer with the parser's final normalized
+        // speech. This removes reasoning tags and handles reasoning-only models.
+        dispatchTracked({
           type: 'UPDATE_MESSAGE',
           payload: {
             id: thinkingMessage.id,
+            content: visibleMessage,
             privateReasoning,
+            reasoningUsedAsContent: usedReasoningAsSpeech,
+            responseNotice,
             rawRequest,
             rawResponse,
             isLoading: false
@@ -196,10 +227,10 @@ export function useDebateEngine(initialConfig: DebateConfig) {
             if (toolName === 'giveUp') {
               try {
                 const args = JSON.parse(toolCall.function.arguments);
-                dispatch({ type: 'GIVE_UP', payload: { winner: opponentAgentId, reason: args.reason, givingUpAgent: currentAgentId } });
+                dispatchTracked({ type: 'GIVE_UP', payload: { winner: opponentAgentId, reason: args.reason, givingUpAgent: currentAgentId } });
                 turnFinished = true;
               } catch (e) {
-                dispatch({ type: 'END_DEBATE', payload: { winner: opponentAgentId } });
+                dispatchTracked({ type: 'END_DEBATE', payload: { winner: opponentAgentId } });
               }
               break;
             }
@@ -212,7 +243,7 @@ export function useDebateEngine(initialConfig: DebateConfig) {
                 else if (customTool.triggerWinner === 'OPPONENT') finalWinner = opponentAgentId;
                 else if (customTool.triggerWinner === 'A' || customTool.triggerWinner === 'B') finalWinner = customTool.triggerWinner;
 
-                dispatch({ 
+                dispatchTracked({
                     type: 'GIVE_UP', 
                     payload: { 
                         winner: finalWinner, 
@@ -240,7 +271,7 @@ export function useDebateEngine(initialConfig: DebateConfig) {
               tool_call_id: toolId,
               intendedFor: currentAgentId // Default to private result for caller
             };
-            dispatch({ type: 'ADD_MESSAGE', payload: toolResponseMessage });
+            dispatchTracked({ type: 'ADD_MESSAGE', payload: toolResponseMessage });
 
             // If 'Send to Opponent' is enabled, post a public update
             if (customTool?.sendToOpponent) {
@@ -252,7 +283,7 @@ export function useDebateEngine(initialConfig: DebateConfig) {
                     content: `[System Update] ${currentAgentConfig.nickname || currentAgentId} used "${toolName}". Result: ${toolResult} (Details: ${args})`,
                     intendedFor: 'ALL'
                 };
-                dispatch({ type: 'ADD_MESSAGE', payload: publicMessage });
+                dispatchTracked({ type: 'ADD_MESSAGE', payload: publicMessage });
             }
           }
 
@@ -265,14 +296,14 @@ export function useDebateEngine(initialConfig: DebateConfig) {
 
           if (hasSpoken) {
             turnFinished = true;
-            dispatch({ type: 'SWITCH_TURN' });
+            dispatchTracked({ type: 'SWITCH_TURN' });
           }
           // If no text was spoken, the loop continues (agent called a tool and now needs to think again)
 
         } else {
           // No tools: its text has already arrived through the actual stream.
           turnFinished = true;
-          dispatch({ type: 'SWITCH_TURN' });
+          dispatchTracked({ type: 'SWITCH_TURN' });
         }
       }
 
@@ -280,7 +311,7 @@ export function useDebateEngine(initialConfig: DebateConfig) {
         lastError = e;
         // Remove the broken thinking message if one was added for this attempt
         if (currentThinkingMessageId) {
-            dispatch({
+            dispatchTracked({
                 type: 'UPDATE_MESSAGE',
                 payload: {
                     id: currentThinkingMessageId,
@@ -306,12 +337,12 @@ export function useDebateEngine(initialConfig: DebateConfig) {
 
     // All retries exhausted
     if (lastError) {
-        dispatch({ type: 'ADD_ERROR', payload: { error: lastError.message } });
-        dispatch({ type: 'END_DEBATE', payload: { winner: 'draw' } });
+        dispatchTracked({ type: 'ADD_ERROR', payload: { error: lastError.message } });
+        dispatchTracked({ type: 'END_DEBATE', payload: { winner: 'draw' } });
     }
 
     isRunningTurn.current = false;
-  }, [dispatch]);
+  }, [dispatchTracked]);
   
   useEffect(() => {
     if (state.isDebating && !state.winner) {
